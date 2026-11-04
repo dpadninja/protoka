@@ -2,6 +2,9 @@
 
 **An alternative Stremio streaming server with extras**
 
+Stremio plays torrents through a separate local service, the *streaming server*. protoka replaces it: keep using
+the Stremio app and point it at protoka.
+
 > protoka is an independent project. It is not affiliated with or endorsed by Stremio. The name "Stremio" is used
 > only to describe compatibility.
 
@@ -19,7 +22,7 @@
 - **Persistent seeding.** Everything in the cache keeps seeding, even after a restart, with configurable limits.
   What you are watching always gets the bandwidth first, and the cache stays within `CACHE_SIZE` by evicting the
   least recently watched torrents.
-- **Drop-in replacement.** Implements the streaming part of the official Stremio server's API (v4.22.5).
+- **Drop-in replacement.** Implements the torrent-streaming part of the Stremio streaming server's API (v4.22.5).
 - **Python + [libtorrent](https://libtorrent.org).** HTTP on [aiohttp](https://docs.aiohttp.org), shipped as a
   single Docker container.
 
