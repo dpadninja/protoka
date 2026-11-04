@@ -1,11 +1,6 @@
 # protoka
 
-**Stremio-compatible torrent streaming server: external subtitles, fonts and dubs muxed into the stream, fast peer discovery and persistent seeding**
-
-protoka speaks the same HTTP API as the official Stremio streaming server (v4.22.5), so the regular Stremio apps
-(desktop, Android TV, mobile) use it unchanged: point *Settings → Streaming → Streaming server URL* at it. Under
-the hood it is Python + [libtorrent](https://libtorrent.org) + [aiohttp](https://docs.aiohttp.org) and runs as a
-single Docker container.
+**An alternative Stremio streaming server with extras**
 
 > protoka is an independent project. It is not affiliated with or endorsed by Stremio. The name "Stremio" is used
 > only to describe compatibility.
@@ -14,102 +9,39 @@ single Docker container.
 
 ## Features
 
-### Peer discovery that actually works
-The official server has several defects that make it slow to find peers. protoka fixes them:
-
-- **It accepts incoming connections.** protoka listens on a BitTorrent port (TCP + uTP, IPv4 and IPv6) and maps
-  it on the router via UPnP / NAT-PMP. The official server announces a port it never opens.
-- **One DHT node for the whole process, warm from the start.** The DHT routing table is kept on disk
-  (saved shortly after start, every 5 minutes and on shutdown), so a restart does not bootstrap from zero.
-  The official server starts a cold DHT for every torrent.
-- **uTP, PEX and Local Service Discovery** are on. It announces to all trackers and tiers, and a real peer id
-  is used.
-- **Extra trackers are added, not substituted.** Trackers passed by an addon or a `.torrent` come on top of the
-  default list and the DHT instead of replacing them.
-- **No download throttling that pauses the swarm.** An optional per-torrent limit (`btDownloadLimit`) is
-  available.
-
-### External subtitles and fonts, embedded into the stream
-Many releases (anime especially) put subtitles in separate folders such as `RUS Subs/`, `Subs/` or `Fonts.zip`.
-protoka finds the subtitles and fonts that belong to the episode being played and builds them into the video
-stream. The player shows them as ordinary subtitle tracks, with no addon and no player support needed.
-
-- **MKV becomes a virtual MKV.** The original clusters are copied byte for byte, subtitle blocks and font
-  attachments are inserted, and the Cues are rewritten. Seeking and Range requests keep working, and the bytes
-  are deterministic, so players can cache them.
-- **AVI / MP4** are remuxed with `ffmpeg -c copy`. Seeking does not work in this mode.
-- **Formats:** ASS/SSA, SRT, VTT, in any legacy encoding (charset detection). Fonts are taken from loose files
-  and from ZIP / 7z / RAR archives. Only the fonts a script actually references are attached.
-- **Matching can be explained.** Every subtitle-to-episode match comes with its reasons (episode number, name
-  similarity, folder language…) in `/:ih/:idx/tracks.json`. Embedded tracks are never touched. If anything
-  fails, the original file is served.
-
-### Fallback fonts with matching letterforms
-If a script asks for a font the torrent does not have, protoka replaces it with a similar bundled one and renames
-it in the script. The rename is needed because libass matches attached fonts by family name only.
-
-- **Metric twins.** Arial / Helvetica become Liberation Sans, Times New Roman becomes Liberation Serif, Courier
-  New becomes Liberation Mono. The glyph widths are identical, so positioned signs keep their layout.
-- **Matching by letterform.** Other fonts are replaced by Noto (sans, serif or mono, bold or italic). The choice
-  comes from a table of about 70 common fonts and from the words in the font name. Narrow faces (Impact,
-  "… Condensed") get a width correction.
-- **CJK.** Noto Sans / Serif CJK are used when the font or the text is Japanese, Chinese or Korean. The
-  substitute must cover every character it has to draw.
-- **Small attachments.** Only the glyphs actually used are embedded (fontTools subset), so even CJK
-  substitutes weigh a few KB.
-
-### External dubs (audio tracks)
-Separate audio tracks (`RUS Sound/`, `Звук/[Studio]/…`) are added to the stream as extra audio tracks.
-
-- A `.mka` track is spliced in without re-encoding.
-- Raw streams (`.ac3`, `.dts`, `.flac`, `.aac`…) are repacked once with `ffmpeg -c copy`. The repack runs in a
-  priority queue: the episode being opened goes first.
-- `PREFERRED_AUDIO_LANG` makes a dub in your language the default track.
-
-### A seeding cache instead of a leech
-- **Everything in the cache keeps seeding.** That includes torrents restored after a restart: they come back
-  without a recheck and are started in small batches.
-- **The video being watched always wins.** While it is still downloading, other torrents only upload. After that,
-  background work resumes: finishing files that were only partly watched, and prefetching the start and end of
-  the **next episode** so it starts instantly.
-- **Eviction.** When the cache would exceed `CACHE_SIZE` (50 GB by default) or the disk runs low, protoka removes
-  whole torrents, least recently watched first. Torrents that reached their seeding limits go before that, and
-  the one being watched is never removed.
-- **Configurable limits:** upload caps, an upload share while watching, ratio and time limits, the number of
-  active seeds.
-- **`/seeding.json`** shows every torrent's state and the reason for it.
-
-### Compatible where it matters
-- `stats.json` matches the strict schema stremio-core parses, so peers and speed show up in the player. This is
-  checked by a contract test.
-- File indices follow the torrent's raw file order, including pad files, as addons expect.
+- **Support for external subtitles and dubs.** Subtitle and audio tracks shipped as separate files in a torrent are
+  found automatically and muxed into the video stream, so any player shows them as ordinary tracks.
+- **The next episode is already there.** While you watch, the start and end of the next episode download in the
+  background, so it starts instantly.
+- **Faster peer discovery.** protoka accepts incoming connections (UPnP / NAT-PMP), keeps one warm DHT across
+  restarts, uses uTP, PEX, LSD and IPv6, and adds an addon's trackers to the defaults instead of replacing them —
+  fixing what makes the official server slow to find peers.
+- **Persistent seeding.** Everything in the cache keeps seeding, even after a restart, with configurable limits.
+  What you are watching always gets the bandwidth first, and the cache stays within `CACHE_SIZE` by evicting the
+  least recently watched torrents.
+- **Drop-in replacement.** Implements the streaming part of the official Stremio server's API (v4.22.5).
+- **Python + [libtorrent](https://libtorrent.org).** HTTP on [aiohttp](https://docs.aiohttp.org), shipped as a
+  single Docker container.
 
 ---
 
 ## Quick start
 
-### Docker
+### From Docker
+The image is on Docker Hub: [`horsetail/protoka`](https://hub.docker.com/r/horsetail/protoka).
+
 ```sh
 docker run -d --name protoka --restart unless-stopped \
+  --user "$(id -u):$(id -g)" \
   -p 11470:11470 -p 42069:42069/tcp -p 42069:42069/udp \
   -v protoka-data:/data \
-  -e CACHE_SIZE=50G -e PREFERRED_AUDIO_LANG=eng \
-  <user>/protoka:latest
+  horsetail/protoka:latest
 ```
 
-- **Data:** everything lives under `/data`. `/data/config` holds settings and the DHT state, and
-  `/data/stremio-cache` holds the torrent cache. Keep the volume, or the DHT starts cold.
-- **Port:** forward the BitTorrent port (42069, TCP and UDP) on your router, unless UPnP / NAT-PMP does it for
-  you. On Linux, `--network host` lets protoka map the port itself.
-- **User:** the container runs as UID 568. Any UID works if `/data` is writable for it.
-
-Check it works: `http://<host>:11470/heartbeat` returns `{"success": true}`.
-
-### Connect Stremio
-In Stremio go to *Settings → Streaming → Streaming server URL* and enter `http://<host>:11470`.
-
-This works for desktop and Android TV. The web app (`web.stremio.com`) needs HTTPS, so put protoka behind a TLS
-reverse proxy and set `CORS_ALLOW_ORIGINS`.
+- **Data:** settings, the DHT state and the torrent cache live in the `protoka-data` volume. Keep it, or the DHT
+  starts cold.
+- **Peers:** forward the BitTorrent port 42069 (TCP and UDP) on your router. On Linux, `--network host` instead of
+  the `-p` options lets protoka open it via UPnP / NAT-PMP itself.
 
 ### From source
 ```sh
@@ -117,7 +49,17 @@ uv sync
 uv run protoka --port 11470 --app-path ./data --bt-port 42069
 ```
 Requires Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/). `ffmpeg`/`ffprobe` are needed for AVI/MP4 remuxing
-and raw audio. `bsdtar` is needed for fonts in RAR archives.
+and raw audio, `bsdtar` for fonts in RAR archives, and the Noto, Noto CJK and Liberation font packages for
+replacing fonts a torrent lacks. Data goes to `./data`.
+
+### Check
+`http://<host>:11470/heartbeat` returns `{"success": true}`.
+
+### Connect Stremio
+In Stremio go to *Settings → Streaming → Streaming server URL* and enter `http://<host>:11470`.
+
+This works for desktop, Android TV and mobile. The web app (`web.stremio.com`) needs HTTPS, so put protoka behind
+a TLS reverse proxy and set `CORS_ALLOW_ORIGINS`.
 
 ---
 
@@ -220,8 +162,8 @@ Images are published only after they pass the same checks locally (`scripts/publ
   built image: Alpine packages and the Python environment. A HIGH or CRITICAL finding that has a fix stops the
   release before anything is pushed (`scripts/scan.sh`). Accepted exceptions live in `.trivyignore.yaml`, each with
   a reason and an expiry date.
-- **Small image.** Base images are pinned by digest. `apk upgrade` runs at build time, and pip is removed from the
-  runtime image. The container runs as a non-root user (UID 568).
+- **Hardened image.** Base images are pinned by digest. `apk upgrade` runs at build time, and pip is removed from
+  the runtime image. The container runs as a non-root user (UID 568 by default; override it with `--user`).
 - **CI on every push and PR.** It runs ruff with the bandit rules, mypy, the tests, the Trivy scans (reports go to
   *Security → Code scanning*), CodeQL and [zizmor](https://docs.zizmor.sh) on the workflows. All actions are pinned
   by commit SHA.
@@ -229,13 +171,10 @@ Images are published only after they pass the same checks locally (`scripts/publ
   re-scan of the published `:latest` opens an issue when a new fixable CVE appears; it is fixed by a new patch
   release, and published tags are never rewritten.
 - **Supply chain.** Released images carry an SBOM and SLSA provenance attestations and a keyless
-  [cosign](https://docs.sigstore.dev) signature from the release workflow. To verify one:
+  [cosign](https://docs.sigstore.dev) signature from the release workflow. The exact `cosign verify` command for
+  each image is in its GitHub release notes.
 
-  ```sh
-  cosign verify <user>/protoka@sha256:… \
-    --certificate-identity-regexp '^https://github.com/<owner>/<repo>/.github/workflows/release.yml@refs/tags/' \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com
-  ```
+---
 
 ## Third-party components
 
@@ -246,6 +185,8 @@ protoka's own code is MIT-licensed. It depends on, and its Docker image ships:
 - **ffmpeg** (LGPL/GPL, Alpine package). It is run as a separate process, not linked.
 - **Fonts:** Noto, Noto CJK and Liberation, all under the SIL Open Font License 1.1. They are unmodified in the
   image. Subsets are made at runtime, on your machine, for your own playback.
+
+---
 
 ## License
 

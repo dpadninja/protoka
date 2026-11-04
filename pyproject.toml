@@ -1,7 +1,7 @@
 [project]
 name = "protoka"
 dynamic = ["version"]  # from the git tag (v1.2.3), see [tool.hatch.version]
-description = "Stremio-compatible torrent streaming server: external subtitles, fonts and dubs muxed into the stream, fast peer discovery and persistent seeding"
+description = "An alternative Stremio streaming server with extras"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
