@@ -1,5 +1,5 @@
 [project]
-name = "istok"
+name = "protoka"
 dynamic = ["version"]  # from the git tag (v1.2.3), see [tool.hatch.version]
 description = "Stremio-compatible torrent streaming server: external subtitles, fonts and dubs muxed into the stream, fast peer discovery and persistent seeding"
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-istok = "istok.__main__:main"
+protoka = "protoka.__main__:main"
 
 [build-system]
 requires = ["hatchling>=1.27", "hatch-vcs>=0.5"]
@@ -31,7 +31,7 @@ source = "vcs"
 fallback-version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
-packages = ["istok"]
+packages = ["protoka"]
 
 [tool.uv]
 # rebuild the project (and so its version) when the commit or the tags change
@@ -56,12 +56,12 @@ line-length = 110
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "TID"]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "TID", "S"]  # S: bandit security rules
 ignore = ["ASYNC109"]  # explicit timeout params are intentional
 
 [tool.ruff.lint.per-file-ignores]
 # tests: long table rows, and blocking file/ffmpeg I/O on purpose
-"tests/**" = ["E501", "ASYNC"]
+"tests/**" = ["E501", "ASYNC", "S101", "S108", "S311", "S603", "S607"]  # + asserts, temp files, subprocess
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

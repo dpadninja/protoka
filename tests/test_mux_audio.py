@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from istok.mux import audio as audio_mod
-from istok.mux import convert
-from istok.mux.audio import AudioError, SidecarAudio
-from istok.mux.layout import build
-from istok.mux.mkv import read_index
-from istok.mux.patch import PatchError, patch_clusters
-from istok.mux.virtual import VirtualFile
+from protoka.mux import audio as audio_mod
+from protoka.mux import convert
+from protoka.mux.audio import AudioError, SidecarAudio
+from protoka.mux.layout import build
+from protoka.mux.mkv import read_index
+from protoka.mux.patch import PatchError, patch_clusters
+from protoka.mux.virtual import VirtualFile
 from tests.media import (
     FFMPEG,
     FFPROBE,
@@ -105,8 +105,8 @@ def crc_errors(data: bytes, start: int, end: int) -> list[int]:
     import struct
     import zlib
 
-    from istok.mux import ebml
-    from istok.mux.ebml import ID
+    from protoka.mux import ebml
+    from protoka.mux.ebml import ID
 
     bad, pos = [], start
     while pos < end:
@@ -126,7 +126,7 @@ async def test_crc_is_recomputed_after_patching(media, tmp_path):
     side = await index_of(media["mka"])
     original = media["mka"].read_bytes()
     assert crc_errors(original, side.first_cluster, side.clusters_end) == []  # the checker agrees with ffmpeg
-    from istok.mux.layout import Patched
+    from protoka.mux.layout import Patched
 
     patched = [
         (off, c) for off, c in zip(vf.layout.offsets, vf.layout.chunks, strict=True) if isinstance(c, Patched)

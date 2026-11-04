@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from istok.subs.fonts import families
+from protoka.subs.fonts import families
 from tests.conftest import connect_to_seed, file_index, logged
 from tests.media import (
     ass_script,
@@ -88,7 +88,7 @@ async def test_subtitles_json_explains_matches(client, torrent_session, anime):
 async def test_mkv_is_served_with_subtitles_and_needed_fonts(
     client, torrent_session, anime, tmp_path, caplog
 ):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     files = await start(client, torrent_session, anime)
     idx = file_index(files, "[Grp] Title - 01 [ABCD1234].mkv")
     url = f"/{anime.info_hash}/{idx}"
@@ -136,12 +136,12 @@ async def test_mkv_is_served_with_subtitles_and_needed_fonts(
     (opened,) = logged(caplog, "stream")  # several requests, one INFO line
     assert opened.startswith(f"{tag} stream: opened → virtual MKV") and "1 subtitle track(s) added" in opened
     assert not any(
-        anime.info_hash in r.getMessage() for r in caplog.records if r.name.startswith("istok.mux")
+        anime.info_hash in r.getMessage() for r in caplog.records if r.name.startswith("protoka.mux")
     )
 
 
 async def test_broken_subtitle_falls_back_to_original(client, torrent_session, anime, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     files = await start(client, torrent_session, anime)
     idx = file_index(files, "[Grp] Title - 02 [BCDE2345].mkv")
     r = await download(client, f"/{anime.info_hash}/{idx}", tmp_path / "ep2.mkv")
@@ -155,7 +155,7 @@ async def test_broken_subtitle_falls_back_to_original(client, torrent_session, a
 
 
 async def test_avi_is_remuxed_with_ffmpeg(client, torrent_session, anime, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     files = await start(client, torrent_session, anime)
     idx = file_index(files, "Title - 03.avi")
     out = tmp_path / "ep3.mkv"
@@ -202,7 +202,7 @@ async def test_mux_can_be_disabled(client, torrent_session, anime, tmp_path):
 async def test_missing_fonts_are_replaced_by_bundled_ones(
     client, torrent_session, make_seed, tmp_path, caplog
 ):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     torrent_session.settings.save({"fallbackFontsDir": str(write_fallback_fonts(tmp_path / "bundle"))})
     media = tmp_path / "media"
     media.mkdir()

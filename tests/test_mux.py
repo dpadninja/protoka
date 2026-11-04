@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from istok.mux import ebml
-from istok.mux.layout import LayoutError, build
-from istok.mux.mkv import MkvError, read_index
-from istok.mux.virtual import VirtualFile
-from istok.subs import fonts, names
-from istok.subs.model import Match
-from istok.subs.service import build_track
+from protoka.mux import ebml
+from protoka.mux.layout import LayoutError, build
+from protoka.mux.mkv import MkvError, read_index
+from protoka.mux.virtual import VirtualFile
+from protoka.subs import fonts, names
+from protoka.subs.model import Match
+from protoka.subs.service import build_track
 from tests.media import (
     FFMPEG,
     FFPROBE,
@@ -191,7 +191,7 @@ async def test_client_disconnect_does_not_break_the_shared_build():
     import asyncio
     from types import SimpleNamespace
 
-    from istok.mux.service import MuxService
+    from protoka.mux.service import MuxService
 
     started, release = asyncio.Event(), asyncio.Event()
     sentinel = object()
@@ -224,7 +224,7 @@ async def test_build_errors_never_leave_waiters_hanging():
     import asyncio
     from types import SimpleNamespace
 
-    from istok.mux.service import MuxService
+    from protoka.mux.service import MuxService
 
     def broken(idx):
         raise RuntimeError("boom")

@@ -1,0 +1,50 @@
+# Weekly re-scan of the published image: CVEs are found after release too. A fixable HIGH/CRITICAL finding opens
+# (or updates) an issue; the cure is a new patch release (the rebuild takes the Dependabot updates and the
+# Alpine fixes via apk upgrade). Published version tags are never rewritten.
+name: rescan
+
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rescan:
+    if: ${{ vars.DOCKERHUB_USERNAME != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    env:
+      IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/protoka:latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan ${{ env.IMAGE }}
+        id: scan
+        run: |
+          docker pull -q "$IMAGE"
+          if ./scripts/scan.sh image "$IMAGE" > report.txt 2>&1; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+          cat report.txt
+      - name: Open or update the issue
+        if: ${{ steps.scan.outputs.found == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Security: rebuild needed ($IMAGE)"
+          { echo "The weekly scan found fixable HIGH/CRITICAL vulnerabilities in \`$IMAGE\` ($RUN_URL)."
+            echo "Fix: merge pending Dependabot PRs, then tag a patch release."
+            echo; echo '```'; grep -E 'CVE-|GHSA-|Total' report.txt | head -60; echo '```'; } > body.md
+          number=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number')
+          if [[ -n "$number" ]]; then gh issue comment "$number" --body-file body.md
+          else gh issue create --title "$title" --body-file body.md; fi

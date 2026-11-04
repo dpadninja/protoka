@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from istok.session import TorrentSession
+from protoka.session import TorrentSession
 from tests.conftest import Seed, connect_to_seed, file_index
 
 T = 30  # seconds per network-ish step
@@ -234,7 +234,7 @@ async def test_reopen_after_restart_without_peers(client, seed: Seed, torrent_se
         assert seed.info_hash in restarted.engines  # restored from the cache, will seed again
         engine = restarted.get(seed.info_hash)
         await asyncio.wait_for(engine.wait_metadata(), T)
-        from istok.stream import read_file
+        from protoka.stream import read_file
 
         restarted.stream_opened(engine)
         data = await asyncio.wait_for(read_file(engine, idx, 10**6), T)
@@ -350,7 +350,7 @@ async def test_client_disconnect_mid_stream_is_not_an_error(caplog):
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
-    from istok.http_app import SESSION_KEY, _serve_stream
+    from protoka.http_app import SESSION_KEY, _serve_stream
 
     events: list[str] = []
 

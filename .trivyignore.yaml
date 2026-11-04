@@ -1,0 +1,9 @@
+# Accepted security findings. Every entry needs a reason and an expiry (at most ~90 days ahead):
+# when it expires the finding fails releases again and has to be looked at anew.
+#
+# vulnerabilities:
+#   - id: CVE-2026-12345
+#     paths: ["usr/lib/libexample.so.1"]          # optional: only where it is not reachable
+#     statement: "ffmpeg's RTSP demuxer; protoka only feeds it local files and its own HTTP stream"
+#     expired_at: 2027-02-01
+vulnerabilities: []

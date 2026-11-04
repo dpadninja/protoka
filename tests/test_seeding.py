@@ -10,7 +10,7 @@ from pathlib import Path
 
 import libtorrent as lt
 
-from istok.stream import read_file
+from protoka.stream import read_file
 from tests.conftest import OFFLINE, Seed, connect_to_seed, file_index, logged
 from tests.stremio_contract import validate
 
@@ -80,7 +80,7 @@ async def test_watched_file_is_seeded_to_others_after_playback(client, torrent_s
 async def test_background_completion_yields_to_what_is_being_watched(
     client, torrent_session, make_seed, caplog
 ):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     a = make_seed({"A.mkv": os.urandom(900_000)}, top="A")
     b = make_seed({"B.mkv": os.urandom(900_000)}, top="B")
     # A: opened, the player left after the first bytes; its source disappears so A stays incomplete.
@@ -128,7 +128,7 @@ async def test_background_completion_yields_to_what_is_being_watched(
 async def test_next_episode_is_prefetched_while_the_player_is_open(
     client, torrent_session, make_seed, caplog
 ):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     torrent_session.settings.save({"prefetchHead": 64 * 1024, "prefetchTail": 32 * 1024})
     seed = make_seed(
         {
@@ -176,7 +176,7 @@ async def test_next_episode_is_prefetched_while_the_player_is_open(
 
 
 async def test_cache_full_evicts_the_least_recently_watched(client, torrent_session, make_seed, caplog):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     old = make_seed({"Old.mkv": os.urandom(700_000)}, top="Old")
     new = make_seed({"New.mkv": os.urandom(700_000)}, top="New")
     await watch(client, torrent_session, old, "Old.mkv")
@@ -227,7 +227,7 @@ async def test_background_upload_is_shared_while_watching(client, torrent_sessio
 async def test_restored_torrents_start_gradually_without_recheck(
     client, torrent_session, make_seed, settings
 ):
-    from istok.session import TorrentSession
+    from protoka.session import TorrentSession
 
     seed = make_seed({"Movie.mkv": os.urandom(300_000)}, top="Movie")
     await watch(client, torrent_session, seed, "Movie.mkv")

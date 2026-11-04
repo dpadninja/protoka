@@ -1,13 +1,13 @@
-# istok
+# protoka
 
 **Stremio-compatible torrent streaming server: external subtitles, fonts and dubs muxed into the stream, fast peer discovery and persistent seeding**
 
-istok speaks the same HTTP API as the official Stremio streaming server (v4.22.5), so the regular Stremio apps
+protoka speaks the same HTTP API as the official Stremio streaming server (v4.22.5), so the regular Stremio apps
 (desktop, Android TV, mobile) use it unchanged: point *Settings → Streaming → Streaming server URL* at it. Under
 the hood it is Python + [libtorrent](https://libtorrent.org) + [aiohttp](https://docs.aiohttp.org) and runs as a
 single Docker container.
 
-> istok is an independent project. It is not affiliated with or endorsed by Stremio. The name "Stremio" is used
+> protoka is an independent project. It is not affiliated with or endorsed by Stremio. The name "Stremio" is used
 > only to describe compatibility.
 
 ---
@@ -15,9 +15,9 @@ single Docker container.
 ## Features
 
 ### Peer discovery that actually works
-The official server has several defects that make it slow to find peers. istok fixes them:
+The official server has several defects that make it slow to find peers. protoka fixes them:
 
-- **It accepts incoming connections.** istok listens on a BitTorrent port (TCP + uTP, IPv4 and IPv6) and maps
+- **It accepts incoming connections.** protoka listens on a BitTorrent port (TCP + uTP, IPv4 and IPv6) and maps
   it on the router via UPnP / NAT-PMP. The official server announces a port it never opens.
 - **One DHT node for the whole process, warm from the start.** The DHT routing table is kept on disk
   (saved shortly after start, every 5 minutes and on shutdown), so a restart does not bootstrap from zero.
@@ -31,7 +31,7 @@ The official server has several defects that make it slow to find peers. istok f
 
 ### External subtitles and fonts, embedded into the stream
 Many releases (anime especially) put subtitles in separate folders such as `RUS Subs/`, `Subs/` or `Fonts.zip`.
-istok finds the subtitles and fonts that belong to the episode being played and builds them into the video
+protoka finds the subtitles and fonts that belong to the episode being played and builds them into the video
 stream. The player shows them as ordinary subtitle tracks, with no addon and no player support needed.
 
 - **MKV becomes a virtual MKV.** The original clusters are copied byte for byte, subtitle blocks and font
@@ -45,7 +45,7 @@ stream. The player shows them as ordinary subtitle tracks, with no addon and no 
   fails, the original file is served.
 
 ### Fallback fonts with matching letterforms
-If a script asks for a font the torrent does not have, istok replaces it with a similar bundled one and renames
+If a script asks for a font the torrent does not have, protoka replaces it with a similar bundled one and renames
 it in the script. The rename is needed because libass matches attached fonts by family name only.
 
 - **Metric twins.** Arial / Helvetica become Liberation Sans, Times New Roman becomes Liberation Serif, Courier
@@ -72,7 +72,7 @@ Separate audio tracks (`RUS Sound/`, `Звук/[Studio]/…`) are added to the s
 - **The video being watched always wins.** While it is still downloading, other torrents only upload. After that,
   background work resumes: finishing files that were only partly watched, and prefetching the start and end of
   the **next episode** so it starts instantly.
-- **Eviction.** When the cache would exceed `CACHE_SIZE` (50 GB by default) or the disk runs low, istok removes
+- **Eviction.** When the cache would exceed `CACHE_SIZE` (50 GB by default) or the disk runs low, protoka removes
   whole torrents, least recently watched first. Torrents that reached their seeding limits go before that, and
   the one being watched is never removed.
 - **Configurable limits:** upload caps, an upload share while watching, ratio and time limits, the number of
@@ -90,17 +90,17 @@ Separate audio tracks (`RUS Sound/`, `Звук/[Studio]/…`) are added to the s
 
 ### Docker
 ```sh
-docker run -d --name istok --restart unless-stopped \
+docker run -d --name protoka --restart unless-stopped \
   -p 11470:11470 -p 42069:42069/tcp -p 42069:42069/udp \
-  -v istok-data:/data \
+  -v protoka-data:/data \
   -e CACHE_SIZE=50G -e PREFERRED_AUDIO_LANG=eng \
-  <user>/istok:latest
+  <user>/protoka:latest
 ```
 
 - **Data:** everything lives under `/data`. `/data/config` holds settings and the DHT state, and
   `/data/stremio-cache` holds the torrent cache. Keep the volume, or the DHT starts cold.
 - **Port:** forward the BitTorrent port (42069, TCP and UDP) on your router, unless UPnP / NAT-PMP does it for
-  you. On Linux, `--network host` lets istok map the port itself.
+  you. On Linux, `--network host` lets protoka map the port itself.
 - **User:** the container runs as UID 568. Any UID works if `/data` is writable for it.
 
 Check it works: `http://<host>:11470/heartbeat` returns `{"success": true}`.
@@ -108,13 +108,13 @@ Check it works: `http://<host>:11470/heartbeat` returns `{"success": true}`.
 ### Connect Stremio
 In Stremio go to *Settings → Streaming → Streaming server URL* and enter `http://<host>:11470`.
 
-This works for desktop and Android TV. The web app (`web.stremio.com`) needs HTTPS, so put istok behind a TLS
+This works for desktop and Android TV. The web app (`web.stremio.com`) needs HTTPS, so put protoka behind a TLS
 reverse proxy and set `CORS_ALLOW_ORIGINS`.
 
 ### From source
 ```sh
 uv sync
-uv run istok --port 11470 --app-path ./data --bt-port 42069
+uv run protoka --port 11470 --app-path ./data --bt-port 42069
 ```
 Requires Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/). `ffmpeg`/`ffprobe` are needed for AVI/MP4 remuxing
 and raw audio. `bsdtar` is needed for fonts in RAR archives.
@@ -170,7 +170,7 @@ The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`�
 | `GET`/`POST` | `/settings` | read / change settings |
 | `GET` | `/network-info`, `/device-info` | host information |
 
-**istok additions:**
+**protoka additions:**
 
 | Method | Path | |
 |---|---|---|
@@ -180,7 +180,7 @@ The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`�
 | `GET` | `/:infoHash/fonts/:font` | a font from the torrent |
 | `GET` | `/seeding.json` | cache budget and usage, background state, every torrent's state and reasons, recent evictions |
 
-**Not implemented** (istok is the torrent core only): HLS / transcoding, the HTTPS endpoint on 12470, casting,
+**Not implemented** (protoka is the torrent core only): HLS / transcoding, the HTTPS endpoint on 12470, casting,
 the bundled web UI.
 
 ---
@@ -190,18 +190,18 @@ the bundled web UI.
 ```sh
 uv sync                     # dependencies (always via uv)
 uv run pytest               # fully offline, ~80 s; ffmpeg-dependent tests are skipped without ffmpeg
-uv run ruff check . && uv run ruff format --check . && uv run mypy istok
-./scripts/publish.sh <user>/istok --dry-run   # tests, image build, smoke test as UID 568
+uv run ruff check . && uv run ruff format --check . && uv run mypy protoka
+./scripts/publish.sh <user>/protoka --dry-run   # tests, image build, smoke test as UID 568
 ```
 
 The tests run real libtorrent sessions against local seeders, generate MKV/AVI media and fonts on the fly, and
 check the stream with ffprobe.
 
 **Layout:**
-- `istok/` — the session, engine and streaming core, plus the HTTP layer;
-- `istok/subs/` — subtitle and font discovery, conversion and font fallback;
-- `istok/mux/` — EBML / Matroska writer, virtual MKV, ffmpeg;
-- `istok/library/` — seeding policy, next episode, eviction.
+- `protoka/` — the session, engine and streaming core, plus the HTTP layer;
+- `protoka/subs/` — subtitle and font discovery, conversion and font fallback;
+- `protoka/mux/` — EBML / Matroska writer, virtual MKV, ffmpeg;
+- `protoka/library/` — seeding policy, next episode, eviction.
 
 Complex logic is split into pure, testable steps and thin I/O services. Decisions such as matches, font
 substitutes and seeding states carry their reasons.
@@ -212,9 +212,34 @@ refuses to overwrite a published tag.
 
 ---
 
+## Security
+
+Images are published only after they pass the same checks locally (`scripts/publish.sh`) and in CI:
+
+- **Scanning.** [Trivy](https://trivy.dev) checks `uv.lock`, the Dockerfile and secrets before the build, then the
+  built image: Alpine packages and the Python environment. A HIGH or CRITICAL finding that has a fix stops the
+  release before anything is pushed (`scripts/scan.sh`). Accepted exceptions live in `.trivyignore.yaml`, each with
+  a reason and an expiry date.
+- **Small image.** Base images are pinned by digest. `apk upgrade` runs at build time, and pip is removed from the
+  runtime image. The container runs as a non-root user (UID 568).
+- **CI on every push and PR.** It runs ruff with the bandit rules, mypy, the tests, the Trivy scans (reports go to
+  *Security → Code scanning*), CodeQL and [zizmor](https://docs.zizmor.sh) on the workflows. All actions are pinned
+  by commit SHA.
+- **Staying clean.** Dependabot sends weekly PRs for `uv.lock`, the base image digests and the actions. A weekly
+  re-scan of the published `:latest` opens an issue when a new fixable CVE appears; it is fixed by a new patch
+  release, and published tags are never rewritten.
+- **Supply chain.** Released images carry an SBOM and SLSA provenance attestations and a keyless
+  [cosign](https://docs.sigstore.dev) signature from the release workflow. To verify one:
+
+  ```sh
+  cosign verify <user>/protoka@sha256:… \
+    --certificate-identity-regexp '^https://github.com/<owner>/<repo>/.github/workflows/release.yml@refs/tags/' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  ```
+
 ## Third-party components
 
-istok's own code is MIT-licensed. It depends on, and its Docker image ships:
+protoka's own code is MIT-licensed. It depends on, and its Docker image ships:
 
 - **Python packages:** libtorrent (BSD), aiohttp (Apache-2.0), fontTools (MIT), psutil (BSD), regex (Apache-2.0),
   charset-normalizer (MIT), rarfile (ISC), py7zr and its codecs (LGPL-2.1+). They are installed unmodified.

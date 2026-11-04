@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from istok.config import EnvError, Settings, env_overrides, parse_size
+from protoka.config import EnvError, Settings, env_overrides, parse_size
 
 
 @pytest.mark.parametrize(
@@ -68,7 +68,7 @@ def test_overrides_win_over_saved_settings(app_path, tmp_path):
 
 def test_bad_env_stops_startup_with_a_clear_message(tmp_path):
     proc = subprocess.run(
-        [sys.executable, "-m", "istok", "--app-path", str(tmp_path)],
+        [sys.executable, "-m", "protoka", "--app-path", str(tmp_path)],
         env={"BT_PORT": "99999", "PATH": "/usr/bin:/bin"},
         capture_output=True, text=True, timeout=60,
     )  # fmt: skip
@@ -151,16 +151,16 @@ def test_old_default_cache_size_is_migrated(app_path):
 
 def test_version_is_logged_at_start(tmp_path):
     """The first log line names the running version (from the package metadata = pyproject.toml)."""
-    import istok
+    import protoka
 
     proc = subprocess.run(
-        [sys.executable, "-m", "istok", "--app-path", str(tmp_path)],
+        [sys.executable, "-m", "protoka", "--app-path", str(tmp_path)],
         env={"BT_PORT": "99999", "PATH": "/usr/bin:/bin"},  # stops right after the banner (bad config)
         capture_output=True, text=True, timeout=60,
     )  # fmt: skip
-    assert f"Starting istok {istok.__version__} " in proc.stderr
-    out = subprocess.run([sys.executable, "-m", "istok", "--version"], capture_output=True, text=True)
-    assert out.stdout.startswith(f"istok {istok.__version__} (Stremio server API")
+    assert f"Starting protoka {protoka.__version__} " in proc.stderr
+    out = subprocess.run([sys.executable, "-m", "protoka", "--version"], capture_output=True, text=True)
+    assert out.stdout.startswith(f"protoka {protoka.__version__} (Stremio server API")
 
 
 def test_font_fallback_env():

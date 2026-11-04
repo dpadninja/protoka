@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Build, smoke-test and publish the image to Docker Hub.
 #
-#   ./scripts/publish.sh <dockerhub-user>/istok [--dry-run] [--force]
+#   ./scripts/publish.sh <dockerhub-user>/protoka [--dry-run] [--force]
 #
 #   The version is the git tag of the commit being published: `git tag v1.2.3` → image <repo>:1.2.3.
 #   Publishing needs HEAD to carry a version tag and a clean work tree, so the image is exactly that commit.
 #   --dry-run  build and smoke-test only, push nothing; works on an untagged or dirty tree too
 #              (version 1.2.4.dev3+g<sha>, image tag with "+" replaced by "-")
 #   --force    push even if this version tag is already published (normally refused)
+#
+# Security gates (scripts/scan.sh, same policy as CI): dependencies and Dockerfile before the build, the image
+# after the smoke test; any fixable HIGH/CRITICAL finding stops the release before anything is pushed.
+# Attestations: with buildx and the containerd image store the image gets an SBOM and max-mode provenance,
+# pushed together with it. REQUIRE_ATTESTATIONS=1 (CI) makes their absence an error instead of a warning.
 #
 # Log in first: docker login
 set -euo pipefail
@@ -19,14 +24,14 @@ for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
         --force) FORCE=1 ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
         -*) echo "unknown option: $arg" >&2; exit 2 ;;
         *) if [[ -z "$REPO" ]]; then REPO="$arg"; else
                echo "unexpected argument: $arg (the version comes from the git tag)" >&2; exit 2; fi ;;
     esac
 done
 if [[ -z "$REPO" || "$REPO" != */* ]]; then
-    echo "usage: $0 <dockerhub-user>/istok [--dry-run] [--force]" >&2
+    echo "usage: $0 <dockerhub-user>/protoka [--dry-run] [--force]" >&2
     exit 2
 fi
 SEMVER='^[0-9]+\.[0-9]+\.[0-9]+([.-]?(a|b|rc)[0-9]+)?$'
@@ -37,7 +42,7 @@ if [[ -n "$TAG" && -z "$DIRTY" ]]; then
     [[ "$VERSION" =~ $SEMVER ]] || { echo "tag $TAG is not a version (expected v1.2.3)" >&2; exit 1; }
 elif (( DRY_RUN )); then
     # what the package itself reports for this tree (hatch-vcs): 1.2.4.dev3+g<sha>[.d<date>]
-    VERSION=$(uv run --quiet python -c "import istok; print(istok.__version__)")
+    VERSION=$(uv run --quiet python -c "import protoka; print(protoka.__version__)")
     echo "note: HEAD is ${TAG:-not tagged}${DIRTY:+, work tree not clean}: dry run with version $VERSION"
 else
     [[ -z "$TAG" ]] && echo "HEAD has no version tag: commit, then tag it, e.g. git tag v1.2.3" >&2
@@ -57,8 +62,28 @@ step "checks: lockfile and tests"
 uv lock --check
 uv run pytest -q
 
+step "security: dependencies, secrets, Dockerfile"
+./scripts/scan.sh source
+
+# SBOM + provenance need BuildKit (buildx) and an image store that keeps attestations (containerd)
+ATTEST=()
+if docker buildx version >/dev/null 2>&1 \
+    && docker info --format '{{range .DriverStatus}}{{.}}{{end}}' 2>/dev/null | grep -q containerd.snapshotter; then
+    ATTEST=(--sbom=true --provenance=mode=max)
+elif [[ "${REQUIRE_ATTESTATIONS:-0}" == 1 ]]; then
+    echo "attestations required, but buildx or the containerd image store is missing" >&2
+    exit 1
+else
+    echo "warning: no buildx/containerd image store here: the image is built without SBOM/provenance attestations" >&2
+fi
+
 step "build $IMAGE (linux/amd64)"
-docker build --platform linux/amd64 --build-arg VERSION="$VERSION" -t "$IMAGE" -t "$REPO:latest" .
+if (( ${#ATTEST[@]} )); then
+    docker buildx build --load "${ATTEST[@]}" --platform linux/amd64 --build-arg VERSION="$VERSION" \
+        -t "$IMAGE" -t "$REPO:latest" .
+else
+    docker build --platform linux/amd64 --build-arg VERSION="$VERSION" -t "$IMAGE" -t "$REPO:latest" .
+fi
 
 step "smoke test: run as 568:568 (TrueNAS 'apps'), wait for /heartbeat"
 WORK=$(mktemp -d)
@@ -85,9 +110,9 @@ SETTINGS=$(curl -sf -m 5 "http://127.0.0.1:$SMOKE_PORT/settings")
 echo "$SETTINGS" | grep -q '"btListenPort": 42099' || { echo "smoke test: BT_PORT not applied" >&2; exit 1; }
 echo "$SETTINGS" | grep -q '"cacheRoot": "/data"' || { echo "smoke test: CACHE_ROOT not applied" >&2; exit 1; }
 [[ "$(docker exec "$NAME" id -u)" == "568" ]] || { echo "smoke test: not running as 568" >&2; exit 1; }
-INNER=$(docker exec "$NAME" python -c "import istok; print(istok.__version__)")
+INNER=$(docker exec "$NAME" python -c "import protoka; print(protoka.__version__)")
 [[ "$INNER" == "$VERSION" ]] || { echo "smoke test: image reports version $INNER, expected $VERSION" >&2; exit 1; }
-FONTS=$(docker exec "$NAME" python -c "from istok.subs import fallback
+FONTS=$(docker exec "$NAME" python -c "from protoka.subs import fallback
 print(sorted({f.family for f in fallback.library('/usr/share/fonts').faces}))")
 for family in "Noto Sans" "Noto Serif" "Noto Sans Mono" "Noto Sans CJK JP" "Noto Serif CJK JP" "Liberation Sans" "Liberation Serif" "Liberation Mono"; do
     [[ "$FONTS" == *"'$family'"* ]] || { echo "smoke test: fallback font $family is missing ($FONTS)" >&2; exit 1; }
@@ -96,6 +121,9 @@ docker stop -t 30 "$NAME" >/dev/null   # graceful stop must save the DHT state
 [[ -s "$WORK/data/config/bt-session.state" ]] || { docker logs "$NAME"; echo "smoke test: no DHT state saved on stop" >&2; exit 1; }
 [[ -d "$WORK/data/stremio-cache" ]] || { echo "smoke test: no cache directory under /data" >&2; exit 1; }
 echo "smoke test passed"
+
+step "security: image"
+./scripts/scan.sh image "$IMAGE"
 
 if (( DRY_RUN )); then
     step "dry run: not pushing $IMAGE"
@@ -108,7 +136,13 @@ if ! docker push "$IMAGE"; then
     exit 1
 fi
 docker push "$REPO:latest"
-DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null || true)
+DIGEST=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"' \
+    || docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null | sed 's/.*@//' || true)
+if [[ "${REQUIRE_ATTESTATIONS:-0}" == 1 ]]; then
+    docker buildx imagetools inspect "$IMAGE" --format '{{json .SBOM}}' | grep -q SPDX \
+        || { echo "the pushed image has no SBOM attestation" >&2; exit 1; }
+fi
 step "published"
 echo "image:  $IMAGE"
-[[ -n "$DIGEST" ]] && echo "digest: $DIGEST   (pin this in TrueNAS for a reproducible install)"
+[[ -n "$DIGEST" ]] && echo "digest: $DIGEST   (pin $REPO@$DIGEST for a reproducible install)"
+[[ -n "${GITHUB_OUTPUT:-}" && -n "$DIGEST" ]] && echo "digest=$DIGEST" >>"$GITHUB_OUTPUT"

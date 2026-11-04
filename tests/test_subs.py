@@ -9,9 +9,9 @@ import zipfile
 import py7zr
 import pytest
 
-from istok.subs import archives, ass, convert, fonts, matching, names
-from istok.subs.model import Episode, Kind, Match
-from istok.subs.service import build_track
+from protoka.subs import archives, ass, convert, fonts, matching, names
+from protoka.subs.model import Episode, Kind, Match
+from protoka.subs.service import build_track
 from tests.media import ass_script, make_font, srt_script
 
 

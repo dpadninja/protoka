@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from fontTools.ttLib import TTFont
 
-from istok.subs import ass, fallback, letterform
-from istok.subs.letterform import MONO, NARROW, SANS, SERIF
+from protoka.subs import ass, fallback, letterform
+from protoka.subs.letterform import MONO, NARROW, SANS, SERIF
 from tests.media import KANJI, ass_script, write_fallback_fonts
 
 

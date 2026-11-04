@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from istok.config import DEFAULTS, Settings
-from istok.cors import origin_allowed
-from istok.guess import file_must_include, guess_file_idx, parse_season_episode
-from istok.stream import ByteRange, RangeNotSatisfiable, parse_range
-from istok.trackers import DEFAULT_TRACKERS, merge_trackers, parse_source
+from protoka.config import DEFAULTS, Settings
+from protoka.cors import origin_allowed
+from protoka.guess import file_must_include, guess_file_idx, parse_season_episode
+from protoka.stream import ByteRange, RangeNotSatisfiable, parse_range
+from protoka.trackers import DEFAULT_TRACKERS, merge_trackers, parse_source
 
 
 def f(path: str, length: int) -> dict:

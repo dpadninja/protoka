@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from istok.mux import ffmpeg
-from istok.mux.convert import BACKGROUND, URGENT, PriorityGate
+from protoka.mux import ffmpeg
+from protoka.mux.convert import BACKGROUND, URGENT, PriorityGate
 from tests.media import make_video, needs_ffmpeg
 
 

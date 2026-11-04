@@ -10,9 +10,9 @@ import struct
 import libtorrent as lt
 import pytest
 
-from istok import session as session_mod
-from istok.config import Settings
-from istok.session import STATE_FILE, TorrentSession, count_saved_nodes
+from protoka import session as session_mod
+from protoka.config import Settings
+from protoka.session import STATE_FILE, TorrentSession, count_saved_nodes
 from tests.conftest import OFFLINE
 
 

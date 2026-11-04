@@ -10,9 +10,9 @@ from pathlib import Path
 import libtorrent as lt
 import pytest
 
-from istok.config import Settings
-from istok.http_app import INFO_KEY, create_app
-from istok.session import TorrentSession
+from protoka.config import Settings
+from protoka.http_app import INFO_KEY, create_app
+from protoka.session import TorrentSession
 
 OFFLINE = {
     "listen_interfaces": "127.0.0.1:0",

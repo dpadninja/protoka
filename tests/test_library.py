@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from istok.library import eviction, next_episode, policy
-from istok.library.model import Limits, State, TorrentView
-from istok.subs.names import parse_file
+from protoka.library import eviction, next_episode, policy
+from protoka.library.model import Limits, State, TorrentView
+from protoka.subs.names import parse_file
 
 NOW = 1_000_000.0
 LIMITS = Limits(bg_downloads=1, stream_grace=120)

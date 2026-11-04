@@ -3,8 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
-**istok** — a Python reimplementation of the **Stremio streaming server** HTTP API (torrent core only) on
-libtorrent + aiohttp (package `istok`, CLI `istok`, image `<user>/istok`; the checkout directory still has its old
+**protoka** — a Python reimplementation of the **Stremio streaming server** HTTP API (torrent core only) on
+libtorrent + aiohttp (package `protoka`, CLI `protoka`, image `<user>/protoka`; the checkout directory still has its old
 name). User-facing docs: `README.md` (English); license MIT (`LICENSE`). `analysis/` is git-ignored: never
 publish the upstream bundle (closed source) and do not link the notes from `README.md`. The upstream server is closed-source; its webpack bundle
 is kept at `analysis/server-v4.22.5.js` and is the reference for API behaviour (notes cite its line
@@ -14,23 +14,27 @@ for each new stage of work. `analysis/02-peer-discovery.md` (P1–P11) and `anal
 
 ## Commands
 All dependencies are managed with **uv** (add with `uv add …`, never pip).
-- Run: `uv run istok` (or `uv run python -m istok --port 11470 --app-path DIR --bt-port N`)
+- Run: `uv run protoka` (or `uv run python -m protoka --port 11470 --app-path DIR --bt-port N`)
 - Tests: `uv run pytest` (fully offline, ~45 s; subtitle/mux tests need `ffmpeg`/`ffprobe` and are skipped without them); single test: `uv run pytest tests/test_api.py::test_stream_ranges -q`
-- Lint/format/types: `uv run ruff check .`, `uv run ruff format .`, `uv run mypy istok`
-- Absolute imports only (`from istok.x import y`; ruff TID252 enforces it)
+- Lint/format/types: `uv run ruff check .`, `uv run ruff format .`, `uv run mypy protoka`
+- Absolute imports only (`from protoka.x import y`; ruff TID252 enforces it)
 - Docker image (one container, env-only config, one `/data` mount):
-  publish with `./scripts/publish.sh <user>/istok [--dry-run] [--force]` (tests, build, smoke test as 568, push).
+  publish with `./scripts/publish.sh <user>/protoka [--dry-run] [--force]` (tests, build, smoke test as 568, push).
   The version is the **git tag** (`git tag v1.2.3`; hatch-vcs, `dynamic = ["version"]`): publishing needs a tagged,
   clean HEAD, `--dry-run` also works untagged (1.2.4.devN+g<sha>). The image build has no `.git` and gets it as
-  `--build-arg VERSION` → `SETUPTOOLS_SCM_PRETEND_VERSION`; `istok.__version__` reads package metadata; an already
+  `--build-arg VERSION` → `SETUPTOOLS_SCM_PRETEND_VERSION`; `protoka.__version__` reads package metadata; an already
   published tag is refused. Never put a version into `pyproject.toml`.
+- Security gates: `scripts/scan.sh source|image <ref>` (Trivy from a pinned container; fail on fixable
+  HIGH/CRITICAL; exceptions only in `.trivyignore.yaml` with `statement` + `expired_at`). `publish.sh` runs both
+  before pushing; CI (`.github/workflows/ci.yml`) runs them on every push/PR. Ruff includes bandit (`S`): fix, or
+  `# noqa: S…` with a reason. Base images are pinned by digest; actions by commit SHA (zizmor checks the workflows).
   Container config is env-only: `BT_PORT`, `CACHE_ROOT`, `CACHE_SIZE`, `PREFERRED_AUDIO_LANG`, `MUX_AUDIO_WAIT`,
   `FONT_FALLBACK`, `FALLBACK_FONTS_DIR`,
   `PORT`, `APP_PATH`, `LOG_LEVEL`
   (`config.env_overrides`, applied on every start over saved settings). One mount point `/data`:
   `/data/config` (APP_PATH) and `/data/stremio-cache` (CACHE_ROOT=/data).
 - Docker (Alpine; libtorrent from its musllinux wheel via uv): `docker compose up -d` (named volume `stremio-data:/data`
-  keeps DHT state and cache) or `docker build -t istok .`
+  keeps DHT state and cache) or `docker build -t protoka .`
 
 ## Architecture
 - `session.py` (`TorrentSession`) owns the **single** `lt.session` for the process (shared DHT whose state

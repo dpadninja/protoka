@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from istok.mux import convert
+from protoka.mux import convert
 from tests.conftest import connect_to_seed, file_index, logged
 from tests.media import make_audio, make_video, needs_ffmpeg, packets_md5, probe
 
@@ -50,7 +50,7 @@ def audio_streams(path: Path) -> list[dict]:
 
 
 async def test_mkv_gets_external_mka_and_repacked_ac3(client, torrent_session, release, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="istok")
+    caplog.set_level(logging.INFO, logger="protoka")
     seed, media = release
     torrent_session.settings.save({"preferredAudioLang": "rus"})
     files = await start(client, torrent_session, seed)

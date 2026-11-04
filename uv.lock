@@ -702,50 +702,6 @@ wheels = [
 ]
 
 [[package]]
-name = "istok"
-source = { editable = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "charset-normalizer" },
-    { name = "fonttools" },
-    { name = "libtorrent" },
-    { name = "psutil" },
-    { name = "py7zr" },
-    { name = "rarfile" },
-    { name = "regex" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-aiohttp" },
-    { name = "ruff" },
-    { name = "types-regex" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.14.5" },
-    { name = "charset-normalizer", specifier = ">=3.5.2" },
-    { name = "fonttools", specifier = ">=4.68.0" },
-    { name = "libtorrent", specifier = ">=2.1.1" },
-    { name = "psutil", specifier = ">=7.2.2" },
-    { name = "py7zr", specifier = ">=1.1.4" },
-    { name = "rarfile", specifier = ">=4.5" },
-    { name = "regex", specifier = ">=2026.9.29" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=2.4.1" },
-    { name = "pytest", specifier = ">=9.2.0" },
-    { name = "pytest-aiohttp", specifier = ">=1.1.1" },
-    { name = "ruff", specifier = ">=0.17.3" },
-    { name = "types-regex", specifier = ">=2026.9.29.20261030" },
-]
-
-[[package]]
 name = "librt"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1150,6 +1106,50 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/ef/8bae0a316d406644450522f2f3d44a4e19632f5f3bb60d1d0e6c53842616/propcache-0.5.4-cp315-cp315t-win_amd64.whl", hash = "sha256:02c0a34f16889cf800f10f0247a564d8ce6eeab6ffcd7c87198f769067eb8432", size = 48574, upload-time = "2026-09-16T00:17:10.077Z" },
     { url = "https://files.pythonhosted.org/packages/57/be/bcc053f66a97355683884b448198e79580fae8e8fa4d96b9bb01614e9913/propcache-0.5.4-cp315-cp315t-win_arm64.whl", hash = "sha256:dc4242ca653c9b30ab51c5f8193323e7bc0928f897ee9103201e59a43abcb72e", size = 45625, upload-time = "2026-09-16T00:17:11.377Z" },
     { url = "https://files.pythonhosted.org/packages/f5/cd/785c64ed382f3f04201870267b02783f63b4678c2acfddc177a3ebcc2727/propcache-0.5.4-py3-none-any.whl", hash = "sha256:62c60aec739ed00124573cce1178138fd690c7676352d67a37328c1cf51d7468", size = 16338, upload-time = "2026-09-16T00:17:13.106Z" },
+]
+
+[[package]]
+name = "protoka"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "charset-normalizer" },
+    { name = "fonttools" },
+    { name = "libtorrent" },
+    { name = "psutil" },
+    { name = "py7zr" },
+    { name = "rarfile" },
+    { name = "regex" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-aiohttp" },
+    { name = "ruff" },
+    { name = "types-regex" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.14.5" },
+    { name = "charset-normalizer", specifier = ">=3.5.2" },
+    { name = "fonttools", specifier = ">=4.68.0" },
+    { name = "libtorrent", specifier = ">=2.1.1" },
+    { name = "psutil", specifier = ">=7.2.2" },
+    { name = "py7zr", specifier = ">=1.1.4" },
+    { name = "rarfile", specifier = ">=4.5" },
+    { name = "regex", specifier = ">=2026.9.29" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=2.4.1" },
+    { name = "pytest", specifier = ">=9.2.0" },
+    { name = "pytest-aiohttp", specifier = ">=1.1.1" },
+    { name = "ruff", specifier = ">=0.17.3" },
+    { name = "types-regex", specifier = ">=2026.9.29.20261030" },
 ]
 
 [[package]]
