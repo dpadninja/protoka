@@ -1,0 +1,79 @@
+[project]
+name = "istok"
+dynamic = ["version"]  # from the git tag (v1.2.3), see [tool.hatch.version]
+description = "Stremio-compatible torrent streaming server: external subtitles, fonts and dubs muxed into the stream, fast peer discovery and persistent seeding"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = [
+    "aiohttp>=3.14.5",
+    "charset-normalizer>=3.5.2",
+    "fonttools>=4.68.0",
+    "libtorrent>=2.1.1",
+    "psutil>=7.2.2",
+    "py7zr>=1.1.4",
+    "rarfile>=4.5",
+    "regex>=2026.9.29",
+]
+
+[project.scripts]
+istok = "istok.__main__:main"
+
+[build-system]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.5"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+# The version is the git tag of the commit: v1.2.3 → 1.2.3. Commits after a tag get 1.2.4.devN+g<sha>,
+# no git at all (e.g. the Docker build context) → SETUPTOOLS_SCM_PRETEND_VERSION, else the fallback.
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["istok"]
+
+[tool.uv]
+# rebuild the project (and so its version) when the commit or the tags change
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "pytest-aiohttp>=1.1.1",
+    "ruff>=0.17.3",
+    "types-regex>=2026.9.29.20261030",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "TID"]
+ignore = ["ASYNC109"]  # explicit timeout params are intentional
+
+[tool.ruff.lint.per-file-ignores]
+# tests: long table rows, and blocking file/ffmpeg I/O on purpose
+"tests/**" = ["E501", "ASYNC"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.mypy]
+python_version = "3.13"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+# no type stubs
+module = ["libtorrent", "fontTools.*", "py7zr", "rarfile", "psutil"]
+ignore_missing_imports = true
