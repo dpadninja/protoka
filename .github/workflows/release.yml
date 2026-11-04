@@ -41,6 +41,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.13"  # the project's Python (requires-python >= 3.13; the image is 3.13 too)
 
       - name: Install ffmpeg (subtitle and audio mux tests)
         run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
