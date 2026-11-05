@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from protoka.library import eviction, next_episode, policy
@@ -181,3 +183,66 @@ def test_eviction_tie_breaks_on_swarm_need_and_reports_shortfall():
     assert [ih for ih, _ in plan(views, st, budget=int(1.5 * GB)).victims] == ["plenty"]
     only_streaming = plan([view("w", size_on_disk=20 * GB)], {"w": State.STREAMING})
     assert only_streaming.victims == [] and only_streaming.still_short == 10 * GB
+
+
+DAY = 86400.0
+
+
+def plan_now(views, st, keep_recent=DAY, **kw):
+    return eviction.choose_victims(
+        views,
+        st,
+        budget=kw.get("budget", 50 * GB),
+        reserve=kw.get("reserve", 0),
+        free_disk=kw.get("free", 1400 * GB),
+        min_free=kw.get("min_free", 2 * GB),
+        now=NOW,
+        keep_recent=keep_recent,
+    )
+
+
+def test_eviction_does_not_delete_for_a_reserve_it_cannot_make_room_for():
+    """analysis/log.log 19:19: a 65 GB film opened with a 50 GB cache → all seeds were deleted for nothing."""
+    seeds = [view(f"s{i}", size_on_disk=GB, last_watched=NOW - 3 * DAY) for i in range(3)]
+    film = view("film", size_on_disk=0, last_watched=NOW)
+    st = {"film": State.STREAMING, **{v.ih: State.SEEDING for v in seeds}}
+    p = plan_now([film, *seeds], st, reserve=65 * GB)
+    assert p.victims == []
+    assert p.still_short == 18 * GB  # 3 + 65 - 50: reported, not "fixed" by deleting
+
+
+def test_eviction_still_makes_room_for_a_reserve_that_fits():
+    old = view("old", size_on_disk=30 * GB, last_watched=NOW - 3 * DAY)
+    film = view("film", size_on_disk=0, last_watched=NOW)
+    p = plan_now([film, old], {"film": State.STREAMING, "old": State.SEEDING}, reserve=25 * GB)
+    assert [ih for ih, _ in p.victims] == ["old"] and p.still_short == 0
+
+
+def test_eviction_frees_the_real_overage_when_the_reserve_cannot_fit():
+    old = view("old", size_on_disk=10 * GB, last_watched=NOW - 3 * DAY)
+    film = view("film", size_on_disk=45 * GB, last_watched=NOW)
+    p = plan_now([film, old], {"film": State.STREAMING, "old": State.SEEDING}, reserve=20 * GB)
+    assert [ih for ih, _ in p.victims] == ["old"]  # 55 GB on disk > 50: that much can be fixed
+
+
+def test_eviction_keeps_what_was_just_watched():
+    """analysis/log.log 19:40: the film stopped 2 min ago (56 GB of a 50 GB cache) was deleted at once."""
+    film = view("film", size_on_disk=56 * GB, last_watched=NOW - 120)
+    p = plan_now([film], {"film": State.SEEDING})
+    assert p.victims == [] and p.over_used == 6 * GB
+    later = plan_now([replace(film, last_watched=NOW - 2 * DAY)], {"film": State.SEEDING})
+    assert [ih for ih, _ in later.victims] == ["film"]
+    off = plan_now([film], {"film": State.SEEDING}, keep_recent=0)
+    assert [ih for ih, _ in off.victims] == ["film"]
+
+
+def test_low_disk_space_evicts_even_what_was_just_watched():
+    film = view("film", size_on_disk=56 * GB, last_watched=NOW - 120)
+    p = plan_now([film], {"film": State.SEEDING}, free=1 * GB)
+    assert [ih for ih, _ in p.victims] == ["film"] and "low free disk" in p.victims[0][1]
+
+
+def test_done_torrents_are_not_protected_by_keep_recent():
+    done = view("done", size_on_disk=60 * GB, last_watched=NOW - 60)
+    p = plan_now([done], {"done": State.DONE})
+    assert [ih for ih, _ in p.victims] == ["done"]

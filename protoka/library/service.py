@@ -85,6 +85,7 @@ class LibraryService:
         self._sizes: dict[str, int] = {}
         self._sizes_at = 0.0
         self._cache_logged_at: float | None = None
+        self._short_logged = 0  # last reported shortfall over CACHE_SIZE (0 = fits): logged on change only
         self._wakeup = asyncio.Event()
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
@@ -381,6 +382,8 @@ class LibraryService:
             reserve=reserve,
             free_disk=free,
             min_free=int(s["minFreeDisk"]),
+            now=time.time(),
+            keep_recent=float(s["cacheKeepRecent"]),
         )
         self.last_eviction = plan
         self._log_cache_size(plan, states, free)
@@ -393,10 +396,21 @@ class LibraryService:
             self.prefetch.pop(ih, None)
             self._prefetch_for.pop(ih, None)
             self.evicted = ([{"infoHash": ih, "reason": reason, "at": time.time()}] + self.evicted)[:20]
-        if plan.still_short > 0:
+        self._log_shortfall(plan)
+
+    def _log_shortfall(self, plan: eviction.Plan) -> None:
+        """Really over CACHE_SIZE on disk with nothing (more) allowed to go: once when it starts, once when it
+        is over. Not the forecast with the reserve: that one moves every tick."""
+        short = plan.over_used
+        if short > 0 and not self._short_logged:
             log.warning(
-                "cache: %d bytes over budget even after evicting everything allowed", plan.still_short
-            )
+                "cache: %s over CACHE_SIZE; kept, as only what is being or was recently watched "
+                "(CACHE_KEEP_RECENT) remains",
+                logfmt.size(short),
+            )  # fmt: skip
+        elif short == 0 and self._short_logged:
+            log.info("cache: within CACHE_SIZE again")
+        self._short_logged = short
 
     def _log_cache_size(self, plan: eviction.Plan, states: dict[str, State], free: int) -> None:
         """Periodic summary of the cache: how full it is, what it holds, what is reserved, disk headroom."""
@@ -471,6 +485,8 @@ class LibraryService:
                 "reserve": plan.reserve if plan else 0,
                 "free": shutil.disk_usage(s.cache_dir()).free,
                 "minFree": int(s["minFreeDisk"]),
+                "keepRecent": s["cacheKeepRecent"],
+                "overBy": plan.over_used if plan else 0,
             },
             "background": {"allowed": allowed, "why": why, "downloads": limits.bg_downloads},
             "limits": {

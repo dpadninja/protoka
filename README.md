@@ -90,8 +90,9 @@ Environment variables are applied on every start and override saved settings. Th
 | `BT_PORT` | `42069` | BitTorrent listen port (TCP + uTP) |
 | `APP_PATH` | `~/.stremio-server` (`/data/config` in Docker) | settings, DHT state, library state |
 | `CACHE_ROOT` | app path (`/data` in Docker) | the cache goes to `<CACHE_ROOT>/stremio-cache` |
-| `CACHE_SIZE` | `50G` | cache budget: `50G`, `512M`, `unlimited`, `0` = no caching |
+| `CACHE_SIZE` | `50G` | cache budget: `50G`, `512M`, `unlimited`, `0` = no caching (recently watched torrents may exceed it, see below) |
 | `MIN_FREE_DISK` | `2G` | evict when the filesystem has less free space than this |
+| `CACHE_KEEP_RECENT` | `24h` | `CACHE_SIZE` never evicts what was watched this recently (`0` = off); low disk space still does |
 | `PREFERRED_AUDIO_LANG` | — | external dub in this language becomes the default track (`rus`, `en`, `japanese`…) |
 | `MUX_AUDIO_WAIT` | `90` | seconds to wait for a raw audio repack before starting playback (`0` = don't wait; the track is added next time) |
 | `MUX_REPACK_CONCURRENCY` | `1` | audio repacks running at once |

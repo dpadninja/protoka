@@ -106,6 +106,7 @@ def test_seeding_env_vars():
         "PREFETCH_TAIL": "4M",
         "MIN_FREE_DISK": "5G",
         "MUX_REPACK_CONCURRENCY": "2",
+        "CACHE_KEEP_RECENT": "12h",
     }
     assert env_overrides(env) == {
         "seedUploadLimit": 2 * 1024**2,
@@ -121,6 +122,7 @@ def test_seeding_env_vars():
         "prefetchTail": 4 * 1024**2,
         "minFreeDisk": 5 * 1024**3,
         "muxRepackConcurrency": 2,
+        "cacheKeepRecent": 12 * 3600,
     }
     assert env_overrides({"SEED_UPLOAD_LIMIT": "unlimited"}) == {"seedUploadLimit": 0}
 

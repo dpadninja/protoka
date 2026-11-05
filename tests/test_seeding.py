@@ -181,7 +181,7 @@ async def test_cache_full_evicts_the_least_recently_watched(client, torrent_sess
     new = make_seed({"New.mkv": os.urandom(700_000)}, top="New")
     await watch(client, torrent_session, old, "Old.mkv")
     await stop_watching(client, torrent_session, old.info_hash)
-    torrent_session.get(old.info_hash).last_watched = time.time() - 3600
+    torrent_session.get(old.info_hash).last_watched = time.time() - 2 * 86400  # beyond CACHE_KEEP_RECENT
     torrent_session.settings.save({"cacheSize": 1_000_000})  # room for one of them
     torrent_session.library._sizes_at = 0  # rescan disk usage now
 
@@ -202,6 +202,32 @@ async def test_cache_full_evicts_the_least_recently_watched(client, torrent_sess
     before = len(sizes)
     await torrent_session.library.tick()
     assert len([m for m in logged(caplog, "cache") if m.startswith("cache: ")]) == before
+
+
+async def test_cache_full_keeps_what_was_just_watched_and_says_so_once(
+    client, torrent_session, make_seed, caplog
+):
+    caplog.set_level(logging.INFO, logger="protoka")
+    old = make_seed({"Old.mkv": os.urandom(700_000)}, top="Old")
+    new = make_seed({"New.mkv": os.urandom(700_000)}, top="New")
+    await watch(client, torrent_session, old, "Old.mkv")
+    await stop_watching(client, torrent_session, old.info_hash)
+    torrent_session.settings.save({"cacheSize": 1_000_000})
+    await watch(client, torrent_session, new, "New.mkv")
+    for _ in range(3):
+        torrent_session.library._sizes_at = 0
+        await torrent_session.library.tick()
+    assert old.info_hash in torrent_session.engines  # watched a minute ago: over CACHE_SIZE, but kept
+    over = [m for m in logged(caplog, "cache") if "over CACHE_SIZE" in m]
+    assert len(over) == 1 and "kept" in over[0]
+    report = await (await client.get("/seeding.json")).json()
+    assert report["cache"]["overBy"] > 0 and report["cache"]["keepRecent"] == 86400
+
+    torrent_session.get(old.info_hash).last_watched = time.time() - 2 * 86400
+    torrent_session.library._sizes_at = 0
+    await torrent_session.library.tick()
+    assert old.info_hash not in torrent_session.engines
+    assert "cache: within CACHE_SIZE again" in logged(caplog, "cache")
 
 
 async def test_background_upload_is_shared_while_watching(client, torrent_session, make_seed):

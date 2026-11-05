@@ -66,6 +66,8 @@ DEFAULTS: dict[str, Any] = {
     "prefetchHead": 32 * 1024**2,
     "prefetchTail": 8 * 1024**2,
     "minFreeDisk": 2 * 1024**3,
+    # CACHE_SIZE never evicts a torrent watched within this many seconds (0 = off); low disk space still does
+    "cacheKeepRecent": 24 * 3600.0,
     "settingsVersion": 2,
 }
 OLD_DEFAULT_CACHE_SIZE = 2147483648
@@ -328,7 +330,12 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
             if not raw.isdigit():
                 raise EnvError(f"{var} must be a whole number >= 0, got {raw!r}")
             out[key] = int(raw)
-    for var, key in {"SEED_TIME_LIMIT": "seedTimeLimit", "STREAM_GRACE": "streamGrace"}.items():
+    durations = {
+        "SEED_TIME_LIMIT": "seedTimeLimit",
+        "STREAM_GRACE": "streamGrace",
+        "CACHE_KEEP_RECENT": "cacheKeepRecent",
+    }
+    for var, key in durations.items():
         if raw := environ.get(var, "").strip():
             out[key] = parse_duration(raw, var)
     if raw := environ.get("SEED_RATIO_LIMIT", "").strip():
