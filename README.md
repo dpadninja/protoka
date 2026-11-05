@@ -18,8 +18,9 @@ the Stremio app and point it at protoka.
   tracks.
 - **Rich subtitle support (ASS/SSA).** Styled subtitles keep their styles, positioning and karaoke: the fonts they
   need are attached to the stream, and fonts missing from the torrent are replaced by similar bundled ones.
-- **The next episode is already there.** While you watch, the start and end of the next episode download in the
-  background, so it starts instantly.
+- **The next episode is already there.** Once the episode you watch is downloaded, the next one downloads with its
+  subtitles, dubs and fonts (raw dubs are repacked ahead), so it starts instantly. Nothing downloads once you stop
+  watching.
 - **Faster peer discovery.** Playback starts sooner, and other peers can connect to protoka too, which the
   official server does not allow.
 - **Persistent seeding.** Everything in the cache keeps seeding, even after a restart, with configurable limits.
@@ -102,11 +103,9 @@ Environment variables are applied on every start and override saved settings. Th
 | `STREAM_BG_UPLOAD_LIMIT` | `0` | while watching: total upload of the *other* torrents |
 | `SEED_RATIO_LIMIT` / `SEED_TIME_LIMIT` | `0` | stop seeding a torrent after this ratio (`2.0`) / time (`7d`); `0` = forever |
 | `SEED_MAX_ACTIVE` | `0` | active seeds at once (libtorrent rotates the rest); `0` = all |
-| `BG_DOWNLOADS` | `1` | background downloads at once (finishing watched files, prefetch) |
 | `BG_MAX_CONNECTIONS` | `20` | connections per torrent that is not being watched |
 | `STREAM_GRACE` | `120` | seconds a torrent still counts as "being watched" after the last request |
-| `PREFETCH_NEXT` | `true` | prefetch the next episode's head and tail |
-| `PREFETCH_HEAD` / `PREFETCH_TAIL` | `32M` / `8M` | how much of the next episode to prefetch |
+| `PREFETCH_NEXT` | `true` | once the episode being watched is downloaded, download the next one (with its subtitles, audio and fonts; raw audio is repacked ahead) |
 | `LOG_LEVEL` | `INFO` | `DEBUG` also logs every range request and ffmpeg command |
 
 The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`â€¦) can be changed through
@@ -137,7 +136,7 @@ The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`â
 | `GET` | `/:infoHash/:fileIdx/tracks.json` | what was found for this video (subtitles, audio, fonts, font substitutes) and why |
 | `GET` | `/:infoHash/:fileIdx/subtitles/:id.(ass\|srt\|vtt)` | an external subtitle, converted |
 | `GET` | `/:infoHash/fonts/:font` | a font from the torrent |
-| `GET` | `/seeding.json` | cache budget and usage, background state, every torrent's state and reasons, recent evictions |
+| `GET` | `/seeding.json` | cache budget and usage, whether the next episode may download, every torrent's state and reasons, recent evictions |
 
 ---
 

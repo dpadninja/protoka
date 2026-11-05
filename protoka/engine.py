@@ -121,6 +121,7 @@ class Engine:
         self._deadline_refs: Counter[int] = Counter()
         self.selections: list[Selection] = []
         self.open_streams = 0
+        self.internal_reads = 0  # our ffmpeg reading a file of this torrent (repack): keeps it downloading
         self.inactive_handle: asyncio.TimerHandle | None = None
         self.sources: dict[str, SourceStats] = {t: SourceStats(f"tracker:{t}") for t in trackers}
         self.sources["dht"] = SourceStats(f"dht:{info_hash}")
@@ -369,8 +370,9 @@ class Engine:
                 self._deadline_refs[p] = n - 1
 
     def ensure_file_wanted(self, file_idx: int) -> None:
-        """Like upstream stream-open: download the whole opened file in the background."""
-        if self.handle.file_priority(file_idx) == 0:
+        """Like upstream stream-open: download the whole opened file in the background (priority 4; the next
+        episode is fetched at 1 and raised when it is opened)."""
+        if self.handle.file_priority(file_idx) < 4:
             self.handle.file_priority(file_idx, 4)
         if file_idx in self.opened_files:
             self.opened_files.remove(file_idx)
@@ -402,7 +404,7 @@ class Engine:
         self.logged_opened.clear()
 
     def remaining_bytes(self) -> int:
-        """Bytes of the opened files not downloaded yet (what `completing` still has to fetch)."""
+        """Bytes of the opened files not downloaded yet: while > 0 the stream needs the line."""
         if not self.opened_files or self._files is None or not self.handle.is_valid():
             return 0
         progress = self.handle.file_progress()

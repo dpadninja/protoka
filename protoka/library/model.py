@@ -7,17 +7,13 @@ from enum import StrEnum
 
 
 class State(StrEnum):
-    STREAMING = "streaming"  # someone watches it, or asked for it within STREAM_GRACE
-    COMPLETING = "completing"  # finishing the files that were opened, in the background
-    PREFETCHING = "prefetching"  # fetching the start/end of the next episode, in the background
-    WAITING = "waiting"  # has background work but may not download now: upload only
-    SEEDING = "seeding"  # nothing left to fetch; libtorrent's queue decides when it is active
+    STREAMING = "streaming"  # someone watches it, or asked for it within STREAM_GRACE: downloads
+    SEEDING = "seeding"  # nobody watches: uploads what is downloaded, never downloads; libtorrent's queue
     DONE = "done"  # reached the ratio/time limit: paused, first to be evicted
 
 
 @dataclass(frozen=True)
 class Limits:
-    bg_downloads: int = 1  # torrents doing background downloads at once
     seed_ratio: float = 0.0  # 0 = no limit
     seed_time: float = 0.0  # seconds of seeding, 0 = no limit
     stream_grace: float = 120.0  # seconds a torrent stays "streaming" after its last activity
@@ -30,6 +26,7 @@ class TorrentView:
     ih: str
     name: str
     open_streams: int = 0
+    internal_reads: int = 0  # our ffmpeg reads a file (audio repack): not a viewer, but needs the data
     last_activity: float | None = None  # unix time: created, stats polled, stream opened/closed
     remaining_bytes: int = 0  # wanted (opened files) bytes not downloaded yet
     prefetch_pending: bool = False  # the next episode's head/tail is not downloaded yet
@@ -52,7 +49,7 @@ class Decision:
     ih: str
     state: State
     reasons: tuple[str, ...] = field(default_factory=tuple)
-    prefetch: bool = False  # fetch the next episode's head/tail now (PREFETCHING, or STREAMING + done)
+    prefetch: bool = False  # download the next episode (and its sidecars) now: STREAMING, current one done
 
     def to_json(self) -> dict:
         return {"state": self.state.value, "reasons": list(self.reasons), "prefetch": self.prefetch}

@@ -11,7 +11,7 @@ from protoka.library.model import Limits, State, TorrentView
 from protoka.subs.names import parse_file
 
 NOW = 1_000_000.0
-LIMITS = Limits(bg_downloads=1, stream_grace=120)
+LIMITS = Limits(stream_grace=120)
 
 
 def view(ih: str, **kw) -> TorrentView:
@@ -30,33 +30,15 @@ def test_streaming_and_grace():
     assert got == {"a": State.STREAMING, "b": State.STREAMING, "c": State.SEEDING}
 
 
-def test_background_waits_while_the_watched_episode_still_downloads():
-    views = [
-        view("watched", open_streams=1, remaining_bytes=500),
-        view("old", remaining_bytes=100, last_watched=NOW - 100),
-        view("next", prefetch_pending=True),
-    ]
-    got = states(views)
-    assert got == {"watched": State.STREAMING, "old": State.WAITING, "next": State.WAITING}
-    reasons = {d.ih: d.reasons for d in policy.decide(views, LIMITS, NOW)}
-    assert "'watched' is being watched and still downloading" in reasons["old"][0]
-
-
-def test_background_runs_once_the_watched_episode_is_downloaded_even_with_the_player_open():
-    views = [view("watched", open_streams=1, remaining_bytes=0), view("old", remaining_bytes=100)]
-    assert states(views)["old"] is State.COMPLETING
-
-
-def test_bg_downloads_limit_and_completing_before_prefetching():
-    views = [
-        view("pre", prefetch_pending=True, last_watched=NOW),
-        view("c-old", remaining_bytes=1, last_watched=NOW - 500),
-        view("c-new", remaining_bytes=1, last_watched=NOW - 10),
-    ]
-    got = states(views)
-    assert got == {"c-new": State.COMPLETING, "c-old": State.WAITING, "pre": State.WAITING}
-    got2 = states(views, Limits(bg_downloads=3))
-    assert got2 == {"c-new": State.COMPLETING, "c-old": State.COMPLETING, "pre": State.PREFETCHING}
+def test_nothing_downloads_once_nobody_watches():
+    """Like TorrServer and the original server: an unfinished file is not completed, what is here seeds."""
+    views = [view("left", remaining_bytes=9 * 1024**3, last_activity=NOW - 600), view("full")]
+    by = {d.ih: d for d in policy.decide(views, LIMITS, NOW)}
+    assert by["left"].state is State.SEEDING and not by["left"].prefetch
+    assert "not watched: seeding what is here, not fetching 9.00 GB of the opened files" in by["left"].reasons
+    assert by["full"].reasons == ("all wanted pieces are here",)
+    gone = policy.decide([view("t", prefetch_pending=True, last_activity=NOW - 600)], LIMITS, NOW)[0]
+    assert gone.state is State.SEEDING and not gone.prefetch  # nor the next episode
 
 
 @pytest.mark.parametrize(
@@ -84,20 +66,26 @@ def test_streaming_beats_limits():
     )
 
 
-def test_watched_torrent_prefetches_its_next_episode_once_downloaded():
-    views = [view("w", open_streams=1, remaining_bytes=0, prefetch_pending=True)]
-    (d,) = policy.decide(views, LIMITS, NOW)
-    assert d.state is State.STREAMING and d.prefetch and "prefetching the next episode" in d.reasons
-    # not while it is still downloading what is being watched
+def test_our_ffmpeg_reading_keeps_a_torrent_downloading_without_the_next_episode():
+    (d,) = policy.decide([view("t", internal_reads=1, remaining_bytes=5, prefetch_pending=True)], LIMITS, NOW)
+    assert d.state is State.STREAMING and not d.prefetch
+    assert d.reasons == ("our ffmpeg reads a file (audio repack)",)
+
+
+def test_the_next_episode_downloads_once_the_watched_one_is_on_disk():
+    (d,) = policy.decide([view("w", open_streams=1, remaining_bytes=0, prefetch_pending=True)], LIMITS, NOW)
+    assert d.state is State.STREAMING and d.prefetch and "downloading the next episode" in d.reasons
+    # not while the episode being watched still downloads
     (d,) = policy.decide([view("w", open_streams=1, remaining_bytes=5, prefetch_pending=True)], LIMITS, NOW)
     assert not d.prefetch
-    # and it shares the BG_DOWNLOADS slot with background completion
+    # nor while another torrent being watched still needs the line
     busy = [
-        view("w", open_streams=1, prefetch_pending=True, last_watched=NOW),
-        view("old", remaining_bytes=1),
+        view("w", open_streams=1, prefetch_pending=True),
+        view("other", open_streams=1, remaining_bytes=1),
     ]
     by = {d.ih: d for d in policy.decide(busy, LIMITS, NOW)}
-    assert by["old"].state is State.COMPLETING and not by["w"].prefetch
+    assert not by["w"].prefetch
+    assert "next episode waits: 'other' is being watched and still downloading" in by["w"].reasons
 
 
 def test_every_decision_has_a_reason():
@@ -134,11 +122,18 @@ def test_next_video(paths, current, expected):
     assert (got.index if got else None) == expected
 
 
-def test_head_tail_pieces():
-    # file at offset 100, 1000 bytes, pieces of 64: head 128 → bytes 100..227, tail 64 → 1036..1099
-    assert next_episode.head_tail_pieces(100, 1000, 64, 128, 64) == [1, 2, 3, 16, 17]
-    assert next_episode.head_tail_pieces(0, 50, 64, 1000, 1000) == [0]  # small file: one piece
-    assert next_episode.head_tail_pieces(0, 0, 64, 10, 10) == []
+def test_an_episode_is_its_video_with_subtitles_audio_and_font_sources():
+    fs = files(
+        "T/[G] Title - 01.mkv",
+        "T/[G] Title - 02.mkv",
+        "T/RUS Subs/[G] Title - 02.ass",
+        "T/RUS Sound/[G] Title - 02.mka",
+        "T/RUS Sound/[G] Title - 01.mka",
+        "T/Fonts/Font.ttf",
+        "T/fonts.rar",
+    )
+    assert next_episode.episode_files(fs, 1) == [1, 2, 3, 5, 6]
+    assert next_episode.episode_files(fs, 0) == [0, 4, 5, 6]
 
 
 # -- eviction ------------------------------------------------------------------------------------

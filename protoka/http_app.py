@@ -26,6 +26,7 @@ from protoka.http_common import (
     ServerInfo,
     create_and_wait,
     error_response,
+    is_internal,
     js_truthy,
     json_response,
     mime_for,
@@ -35,12 +36,14 @@ from protoka.http_common import (
     session_of,
     sources_from_options,
 )
+from protoka.library import next_episode
 from protoka.mux import ffmpeg
-from protoka.mux.service import MuxedFfmpeg, MuxedVirtual, MuxService
+from protoka.mux.service import MuxedFfmpeg, MuxedVirtual, MuxService, subtitle_service
 from protoka.session import TorrentSession
 from protoka.stats import engine_stats, sys_stats
 from protoka.stream import FileStream, RangeNotSatisfiable, parse_range
 from protoka.subs import fallback
+from protoka.subs.model import Kind
 
 log = logging.getLogger(__name__)
 
@@ -206,6 +209,8 @@ async def stream_file(request: web.Request) -> web.StreamResponse:
     if q.get("subtitles"):
         headers["CaptionInfo.sec"] = q["subtitles"]
 
+    if not is_internal(request):
+        _want_episode(engine, idx)
     muxed = None if q.get("mux") == "0" else await request.app[MUX_KEY].open(engine, idx)
     _log_opened(engine, idx, muxed, f["length"], request)
     if isinstance(muxed, MuxedFfmpeg):
@@ -222,10 +227,20 @@ async def stream_file(request: web.Request) -> web.StreamResponse:
     return await _serve_ranges(request, engine, idx, headers, f["length"], original)
 
 
+def _want_episode(engine: Engine, idx: int) -> None:
+    """A video is opened: its subtitles, external audio and font sources are wanted too, before anything
+    reads them, so their pieces go to the real files, not to libtorrent's part file (analysis/18)."""
+    files = subtitle_service(engine).files
+    if idx >= len(files) or files[idx].kind is not Kind.VIDEO:
+        return
+    for fi in next_episode.episode_files(files, idx):
+        engine.ensure_file_wanted(fi)
+
+
 def _log_opened(engine: Engine, idx: int, muxed: object, length: int, request: web.Request) -> None:
     """INFO once per file per watching session (reset by Engine.release_memory); every request at DEBUG."""
     what = request.headers.get("Range") or "whole file"
-    if request.headers.get("User-Agent", "").startswith("Lavf"):  # our own ffmpeg (repack / remux)
+    if is_internal(request):  # our own ffmpeg (repack / remux)
         log.debug("%s stream: read by ffmpeg (internal) %s", logfmt.tag(engine, idx), what)
         return
     if idx in engine.logged_opened:
@@ -293,7 +308,12 @@ async def _serve_stream(
         await resp.write_eof()
         return resp
     engine.ensure_file_wanted(idx)
-    ses.stream_opened(engine)
+    internal = is_internal(request)
+    if internal:
+        engine.internal_reads += 1
+        ses.library.poke()
+    else:
+        ses.stream_opened(engine)
     try:
         await resp.prepare(request)
         async for chunk in chunks:
@@ -309,7 +329,11 @@ async def _serve_stream(
         aclose = getattr(chunks, "aclose", None)
         if aclose is not None:
             await aclose()
-        ses.stream_closed(engine)
+        if internal:
+            engine.internal_reads -= 1
+            ses.library.poke()
+        else:
+            ses.stream_closed(engine)
     return resp
 
 
@@ -400,6 +424,7 @@ def create_app(
             fallback.library(settings["fallbackFontsDir"]) if settings["fontFallback"] else None
         ),
     )
+    session.library.on_prefetched = app[MUX_KEY].prepare  # the next episode is on disk: repack its audio
     r = app.router
     # specific routes first: aiohttp matches in registration order
     r.add_get("/favicon.ico", favicon)

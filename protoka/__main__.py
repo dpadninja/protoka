@@ -102,7 +102,7 @@ async def serve(args: argparse.Namespace) -> None:
         "Effective config: http=%s:%s bt_port=%s app_path=%s cache=%s (limit %s) uid=%s "
         "mux=%s preferred_audio=%s audio_wait=%ss repacks=%s font_fallback=%s | "
         "seeding: upload=%s bg_upload_while_watching=%s max_active=%s ratio=%s time=%ss "
-        "bg_downloads=%s bg_conns=%s grace=%ss prefetch=%s min_free=%s keep_recent=%ss",
+        "bg_conns=%s grace=%ss next_episode=%s min_free=%s keep_recent=%ss",
         args.host,
         args.port,
         settings["btListenPort"],
@@ -120,7 +120,6 @@ async def serve(args: argparse.Namespace) -> None:
         settings["seedMaxActive"] or "all",
         settings["seedRatioLimit"] or "none",
         settings["seedTimeLimit"] or "none",
-        settings["bgDownloads"],
         settings["bgMaxConnections"],
         settings["streamGrace"],
         settings["prefetchNext"],

@@ -1,17 +1,17 @@
 """Decide the state of every torrent. Pure: snapshots in, decisions (with reasons) out.
 
-Rules, first match wins:
-    1. open streams, or any activity (create, stats, stream) less than STREAM_GRACE ago → streaming
-    2. seeding ratio or seeding time limit reached                     → done
-    3. opened files not fully downloaded                               → completing | waiting
-    4. the next episode's head/tail not downloaded yet (prefetch)      → prefetching | waiting
-    5. everything else                                                 → seeding (libtorrent's queue)
+Like TorrServer and the original Stremio server (analysis/20-streaming-clients.md): only what is being watched
+downloads; whatever is downloaded keeps seeding.
 
-Background downloads (3 and 4) only run when *background is allowed* — no streaming torrent still has
-bytes to download — and at most `bg_downloads` torrents at once, the most recently watched first;
-completing goes before prefetching. Everything else that has work to do waits in upload-only mode.
-A streaming torrent whose watched file is already downloaded may prefetch its next episode too
-(state stays `streaming`, `Decision.prefetch` is set) — that is when prefetching is most useful.
+    1. open streams, or any activity (create, stats, stream) less than STREAM_GRACE ago → streaming
+         the opened episode downloads at full speed; once it (with its sidecars) is complete, the next episode
+         downloads too (`Decision.prefetch`) — one episode ahead, and only while someone watches
+       our ffmpeg still reads a file (an audio repack the viewer started)  → streaming, no next episode:
+         a repack must not hang on data that no longer downloads
+    2. seeding ratio or seeding time limit reached                     → done (paused)
+    3. everything else                                                 → seeding (upload only)
+
+The next episode waits while any watched episode (in any torrent) still downloads: the line is the stream's.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from protoka.library.model import Decision, Limits, State, TorrentView
+from protoka.logfmt import size
 
 
 def is_streaming(v: TorrentView, limits: Limits, now: float) -> bool:
@@ -27,11 +28,12 @@ def is_streaming(v: TorrentView, limits: Limits, now: float) -> bool:
     return v.last_activity is not None and now - v.last_activity < limits.stream_grace
 
 
-def background_allowed(views: Sequence[TorrentView], limits: Limits, now: float) -> tuple[bool, str]:
+def line_free(views: Sequence[TorrentView], limits: Limits, now: float) -> tuple[bool, str]:
+    """May the next episode download? Not while an episode being watched still needs the line."""
     busy = [v for v in views if is_streaming(v, limits, now) and v.remaining_bytes > 0]
     if busy:
         return False, f"{busy[0].name!r} is being watched and still downloading"
-    return True, "nothing being watched needs the line"
+    return True, "the episode being watched is downloaded"
 
 
 def _limit_reason(v: TorrentView, limits: Limits, now: float) -> str | None:
@@ -44,51 +46,30 @@ def _limit_reason(v: TorrentView, limits: Limits, now: float) -> str | None:
 
 
 def decide(views: Sequence[TorrentView], limits: Limits, now: float) -> list[Decision]:
-    allowed, why = background_allowed(views, limits, now)
-    decisions: dict[str, Decision] = {}
-    completing: list[TorrentView] = []
-    prefetching: list[TorrentView] = []
-
-    watched_prefetch: list[TorrentView] = []  # being watched, fully downloaded, next episode not yet
+    free, why = line_free(views, limits, now)
+    out = []
     for v in views:
         if is_streaming(v, limits, now):
-            detail = (
+            reasons = [
                 f"{v.open_streams} open stream(s)" if v.open_streams else "requested recently (stream grace)"
-            )
-            decisions[v.ih] = Decision(v.ih, State.STREAMING, (detail,))
-            if v.prefetch_pending and v.remaining_bytes == 0:
-                watched_prefetch.append(v)
+            ]
+            prefetch = v.prefetch_pending and v.remaining_bytes == 0 and free
+            if prefetch:
+                reasons.append("downloading the next episode")
+            elif v.prefetch_pending and v.remaining_bytes == 0:
+                reasons.append(f"next episode waits: {why}")
+            out.append(Decision(v.ih, State.STREAMING, tuple(reasons), prefetch=prefetch))
+        elif v.internal_reads > 0:
+            out.append(Decision(v.ih, State.STREAMING, ("our ffmpeg reads a file (audio repack)",)))
         elif (reason := _limit_reason(v, limits, now)) is not None:
-            decisions[v.ih] = Decision(v.ih, State.DONE, (reason,))
-        elif v.remaining_bytes > 0:
-            completing.append(v)
-        elif v.prefetch_pending:
-            prefetching.append(v)  # not watched any more but the next episode was not fetched yet
-        else:
-            decisions[v.ih] = Decision(v.ih, State.SEEDING, ("all wanted pieces are here",))
-
-    slots = max(0, limits.bg_downloads)
-    for group, state, what in (
-        (completing, State.COMPLETING, "finishing opened files"),
-        (prefetching, State.PREFETCHING, "prefetching the next episode"),
-    ):
-        for v in sorted(group, key=lambda x: -x.last_watched):  # most recently watched first
-            if not allowed:
-                decisions[v.ih] = Decision(v.ih, State.WAITING, (f"{what} paused: {why}",))
-            elif slots > 0:
-                slots -= 1
-                decisions[v.ih] = Decision(v.ih, state, (what, why), prefetch=state is State.PREFETCHING)
-            else:
-                decisions[v.ih] = Decision(
-                    v.ih, State.WAITING, (f"{what} queued: BG_DOWNLOADS={limits.bg_downloads} in use",)
-                )
-    # The usual case: the next episode is in the torrent being watched, and the current one is already
-    # downloaded long before it ends. It stays `streaming` but may prefetch, within the same slots.
-    for v in sorted(watched_prefetch, key=lambda x: -x.last_watched):
-        if allowed and slots > 0:
-            slots -= 1
-            d = decisions[v.ih]
-            decisions[v.ih] = Decision(
-                v.ih, d.state, (*d.reasons, "prefetching the next episode"), prefetch=True
+            out.append(Decision(v.ih, State.DONE, (reason,)))
+        elif v.remaining_bytes > 0 or v.prefetch_pending:
+            left = (
+                f"{size(v.remaining_bytes)} of the opened files" if v.remaining_bytes else "the next episode"
             )
-    return [decisions[v.ih] for v in views]
+            out.append(
+                Decision(v.ih, State.SEEDING, (f"not watched: seeding what is here, not fetching {left}",))
+            )
+        else:
+            out.append(Decision(v.ih, State.SEEDING, ("all wanted pieces are here",)))
+    return out

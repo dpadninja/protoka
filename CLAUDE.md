@@ -72,9 +72,11 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
   `VirtualFile(layout, read)` reads sources by key: `video`, `file:<idx>`, `local:<path>`.
 - **Seeding library** (`library/`, `analysis/15-seeding.md`): torrents are never unloaded on inactivity; the
   `LibraryService` tick snapshots every torrent (`TorrentView`), `policy.decide` gives states with reasons
-  (streaming / completing / prefetching / waiting / seeding = libtorrent auto-managed queue / done), applies them
+  (streaming = downloads, next episode once the watched one is on disk / seeding = upload only,
+  libtorrent auto-managed queue / done), applies them
   idempotently (`Engine.applied`), then `eviction.choose_victims` (never streaming; done first, then LRU by
-  watching). "Background allowed" = no streaming torrent still downloads. `/remove` ends watching only;
+  watching). Nothing downloads once nobody watches (`analysis/21-watch-only.md`); the next episode waits
+  while any watched episode still downloads. Our own ffmpeg (UA `Lavf`) is not a viewer. `/remove` ends watching only;
   `?purge=1` deletes. Torrents in the cache are restored on start (paused, released in batches).
 - `stats.py` must stay field-compatible with upstream `getStatistics`: stremio-core parses it with a **strict serde
   schema** (mirrored in `tests/stremio_contract.py`); one missing/mistyped required field (e.g. a null

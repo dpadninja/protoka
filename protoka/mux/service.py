@@ -48,6 +48,7 @@ log = logging.getLogger(__name__)
 BUILD_TIMEOUT = 20.0
 AUDIO_EXTRA_TIME = 15.0  # on top of the audio wait: index reading, subtitles, layout
 MKV_EXTS = (".mkv", ".mk3d", ".mka", ".webm")
+_background: set[asyncio.Task[None]] = set()  # prepare() tasks, referenced until they finish
 
 
 @dataclass
@@ -116,6 +117,42 @@ class MuxService:
         self._audio_wait = audio_wait
         self._preferred_audio_lang = preferred_audio_lang
         self._fallback_fonts = fallback_fonts  # bundled substitutes for missing fonts, or None (off)
+
+    # -- ahead of time ---------------------------------------------------------------------------
+    def prepare(self, engine: Engine, idx: int) -> None:
+        """The next episode `idx` is on disk: repack its external audio now (low priority), so opening it
+        does not wait for ffmpeg. Only the converted .mka files are kept (on disk); the virtual MKV itself is
+        built on open from local files, which takes a moment."""
+        if not self._enabled() or ffmpeg.ffmpeg_binary() is None:
+            return
+        task = asyncio.create_task(self._prepare(engine, idx))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+
+    async def _prepare(self, engine: Engine, idx: int) -> None:
+        try:
+            files = engine.files or []
+            if not files[idx]["name"].lower().endswith(MKV_EXTS):
+                return  # other containers go through ffmpeg, which reads the audio as it is
+            subs = subtitle_service(engine)
+            video: MkvIndex | None = None
+            for m in subs.audio_matches(idx):
+                fi = m.sub.index
+                if m.sub.ext in MKA_EXTS:
+                    try:
+                        if video is None:
+                            video = await read_index(_torrent_reader(engine, idx), files[idx]["length"])
+                        index = await read_index(_torrent_reader(engine, fi), m.sub.size)
+                        audio_mod.check_compatible(video, index)
+                        continue  # copied as is on open
+                    except (MkvError, AudioError):
+                        pass
+                out = convert.converted_path(engine.save_path, fi)
+                convert.ensure_mka(
+                    self._source_url(engine.info_hash, fi), out, urgent=False, tag=logfmt.tag(engine, fi)
+                )
+        except Exception:  # noqa: BLE001 — preparing ahead is an optimisation, never an error
+            log.exception("%s mux: preparing the next episode failed", logfmt.tag(engine, idx))
 
     def status(self, engine: Engine, idx: int) -> dict[str, Any] | None:
         entry = self._cache(engine).get(idx)

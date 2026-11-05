@@ -137,8 +137,10 @@ async def create_and_wait(
     options: dict[str, Any] | None = None,
 ) -> Engine:
     ses = session_of(request)
-    engine = await ses.create(ih, sources=sources, torrent=torrent, options=options)
-    ses.stream_opened(engine)  # a pending request keeps the engine alive while metadata arrives
+    internal = is_internal(request)
+    engine = await ses.create(ih, sources=sources, torrent=torrent, options=options, touch=not internal)
+    if not internal:
+        ses.stream_opened(engine)  # a pending request keeps the engine alive while metadata arrives
     started = time.monotonic()
     waiting = not engine.metadata_ready.is_set()
     if waiting:
@@ -156,8 +158,15 @@ async def create_and_wait(
     except EngineError as e:
         raise web.HTTPServiceUnavailable(text=f'{{"error": "{e}"}}', content_type="application/json") from e
     finally:
-        ses.stream_closed(engine)
+        if not internal:
+            ses.stream_closed(engine)
     return engine
+
+
+def is_internal(request: web.Request) -> bool:
+    """Our own ffmpeg (audio repack, remux) reading a torrent file back through the server. Not a viewer:
+    it must not keep a torrent "being watched" (a background repack would otherwise never let it go)."""
+    return request.headers.get("User-Agent", "").startswith("Lavf")
 
 
 def resolve_file_idx(engine: Engine, raw_idx: str, must_include: list[str]) -> int:

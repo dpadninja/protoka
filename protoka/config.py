@@ -59,12 +59,9 @@ DEFAULTS: dict[str, Any] = {
     "seedMaxActive": 0,  # libtorrent active_seeds
     "seedRatioLimit": 0.0,
     "seedTimeLimit": 0.0,  # seconds
-    "bgDownloads": 1,  # background downloads (finish watched files, prefetch) at once
     "bgMaxConnections": 20,  # per torrent that is not being watched
     "streamGrace": 120.0,  # seconds a torrent counts as "being watched" after the last activity
     "prefetchNext": True,
-    "prefetchHead": 32 * 1024**2,
-    "prefetchTail": 8 * 1024**2,
     "minFreeDisk": 2 * 1024**3,
     # CACHE_SIZE never evicts a torrent watched within this many seconds (0 = off); low disk space still does
     "cacheKeepRecent": 24 * 3600.0,
@@ -311,8 +308,6 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
     sizes = {
         "SEED_UPLOAD_LIMIT": "seedUploadLimit",
         "STREAM_BG_UPLOAD_LIMIT": "streamBgUploadLimit",
-        "PREFETCH_HEAD": "prefetchHead",
-        "PREFETCH_TAIL": "prefetchTail",
         "MIN_FREE_DISK": "minFreeDisk",
     }
     for var, key in sizes.items():
@@ -321,7 +316,6 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
             out[key] = 0 if value is None else value  # "unlimited" = 0 = no limit
     counts = {
         "SEED_MAX_ACTIVE": "seedMaxActive",
-        "BG_DOWNLOADS": "bgDownloads",
         "BG_MAX_CONNECTIONS": "bgMaxConnections",
         "MUX_REPACK_CONCURRENCY": "muxRepackConcurrency",
     }
