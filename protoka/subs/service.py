@@ -75,9 +75,10 @@ class SubtitleService:
     def font_sources(self, video_idx: int) -> list[fonts.FontSource]:
         return fonts.locate(self.files, self.files[video_idx])
 
-    def warn(self, msg: str) -> None:
+    def warn(self, msg: str, level: int = logging.WARNING) -> None:
+        """Report a problem in subtitles.json `warnings`, logged once."""
         if msg not in self.warnings:
-            log.warning("%s: %s", self.engine.info_hash, msg)
+            log.log(level, "%s: %s", self.engine.info_hash, msg)
             self.warnings.append(msg)
 
     # -- subtitles -----------------------------------------------------------------------------
@@ -141,7 +142,10 @@ class SubtitleService:
         all_faces = [f for faces in loaded for f in faces]
         picked, missing = fonts.pick(needed, all_faces)
         if missing:
-            self.warn(f"fonts not found in torrent: {', '.join(sorted(missing))}")
+            # with fallback fonts this is routine: each name is replaced below, and only a name that cannot be
+            # is a warning ("no bundled fallback font")
+            level = logging.INFO if fallback_fonts is not None else logging.WARNING
+            self.warn(f"fonts not found in torrent: {', '.join(sorted(missing))}", level)
         if missing and fallback_fonts is not None:
             tracks, extra = await self._fallback(video_idx, tracks, missing, fallback_fonts)
             picked = [*picked, *extra]

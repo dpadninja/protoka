@@ -163,6 +163,9 @@ def main() -> None:
     logging.basicConfig(
         level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
+        # fontTools.subset logs ~200 INFO lines per subset font; our "mux: ~ font …" line says what matters
+        logging.getLogger("fontTools").setLevel(logging.WARNING)
     asyncio.run(serve(args))
 
 
