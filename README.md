@@ -12,17 +12,29 @@ the Stremio app and point it at protoka.
 
 ## Features
 
-- **Support for external subtitles and dubs.** Subtitle and audio tracks shipped as separate files in a torrent are
-  found automatically and muxed into the video stream, so any player shows them as ordinary tracks.
+- **External subtitles.** Subtitle files shipped separately in a torrent are found automatically and muxed into the
+  video stream, so the player shows them as ordinary subtitle tracks.
+- **External audio tracks.** Dubs shipped as separate files are found and added to the video stream as extra audio
+  tracks.
+- **Rich subtitle support (ASS/SSA).** Styled subtitles keep their styles, positioning and karaoke: the fonts they
+  need are attached to the stream, and fonts missing from the torrent are replaced by similar bundled ones.
 - **The next episode is already there.** While you watch, the start and end of the next episode download in the
   background, so it starts instantly.
-- **Faster peer discovery.** protoka accepts incoming connections (UPnP / NAT-PMP), keeps one warm DHT across
-  restarts, uses uTP, PEX, LSD and IPv6, and adds an addon's trackers to the defaults instead of replacing them —
-  fixing what makes the official server slow to find peers.
+- **Faster peer discovery.** Playback starts sooner, and other peers can connect to protoka too, which the
+  official server does not allow.
 - **Persistent seeding.** Everything in the cache keeps seeding, even after a restart, with configurable limits.
-  What you are watching always gets the bandwidth first, and the cache stays within `CACHE_SIZE` by evicting the
-  least recently watched torrents.
+  What you are watching always gets the bandwidth first.
 - **Drop-in replacement.** Implements the torrent-streaming part of the Stremio streaming server's API (v4.22.5).
+
+---
+
+## Limitations
+
+- **No HLS, so no Stremio web app.** protoka sends the original video, and browsers often cannot play its codecs 
+(HEVC, AC3, DTS, etc) or its ASS subtitles.
+- **ASS subtitles depend on the player.** mpv and VLC render them in full; ExoPlayer (Android, Android TV) shows only
+  basic styles without the attached fonts.
+- **Also not implemented:** the HTTPS endpoint on 12470, casting, the bundled web UI.
 
 ---
 
@@ -57,10 +69,11 @@ replacing fonts a torrent lacks. Data goes to `./data`.
 `http://<host>:11470/heartbeat` returns `{"success": true}`.
 
 ### Connect Stremio
-In Stremio go to *Settings → Streaming → Streaming server URL* and enter `http://<host>:11470`.
+In the Stremio app open *Settings*, find *Streaming server URL* and enter `http://<host>:11470`, where `<host>` is
+the LAN address of the machine running protoka.
 
-This works for desktop, Android TV and mobile. The web app (`web.stremio.com`) needs HTTPS, so put protoka behind
-a TLS reverse proxy and set `CORS_ALLOW_ORIGINS`.
+This works for the desktop, Android TV and mobile apps and for external players. The web app (`web.stremio.com`)
+is not supported, see [Limitations](#limitations).
 
 ---
 
@@ -90,7 +103,6 @@ Environment variables are applied on every start and override saved settings. Th
 | `STREAM_GRACE` | `120` | seconds a torrent still counts as "being watched" after the last request |
 | `PREFETCH_NEXT` | `true` | prefetch the next episode's head and tail |
 | `PREFETCH_HEAD` / `PREFETCH_TAIL` | `32M` / `8M` | how much of the next episode to prefetch |
-| `CORS_ALLOW_ORIGINS` | — | extra allowed origins (comma-separated) |
 | `LOG_LEVEL` | `INFO` | `DEBUG` also logs every range request and ffmpeg command |
 
 The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`…) can be changed through
@@ -122,9 +134,6 @@ The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`�
 | `GET` | `/:infoHash/:fileIdx/subtitles/:id.(ass\|srt\|vtt)` | an external subtitle, converted |
 | `GET` | `/:infoHash/fonts/:font` | a font from the torrent |
 | `GET` | `/seeding.json` | cache budget and usage, background state, every torrent's state and reasons, recent evictions |
-
-**Not implemented** (protoka is the torrent core only): HLS / transcoding, the HTTPS endpoint on 12470, casting,
-the bundled web UI.
 
 ---
 
