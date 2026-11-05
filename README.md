@@ -45,7 +45,6 @@ The image is on Docker Hub: [`horsetail/protoka`](https://hub.docker.com/r/horse
 
 ```sh
 docker run -d --name protoka --restart unless-stopped \
-  --user "$(id -u):$(id -g)" \
   -p 11470:11470 -p 42069:42069/tcp -p 42069:42069/udp \
   -v protoka-data:/data \
   horsetail/protoka:latest
@@ -53,6 +52,10 @@ docker run -d --name protoka --restart unless-stopped \
 
 - **Data:** settings, the DHT state and the torrent cache live in the `protoka-data` volume. Keep it, or the DHT
   starts cold.
+- **User:** the container runs as UID 10001. With a host directory instead of a volume
+  (`-v /srv/protoka:/data`), run it as the owner of that directory: `--user "$(id -u):$(id -g)"`, or
+  `--user 568:568` for a TrueNAS dataset of the `apps` user. A volume created by protoka 0.1.x belongs to 568: add
+  `--user 568:568` to keep using it.
 - **Peers:** forward the BitTorrent port 42069 (TCP and UDP) on your router. On Linux, `--network host` instead of
   the `-p` options lets protoka open it via UPnP / NAT-PMP itself.
 
@@ -143,7 +146,7 @@ The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`â
 uv sync                     # dependencies (always via uv)
 uv run pytest               # fully offline, ~80 s; ffmpeg-dependent tests are skipped without ffmpeg
 uv run ruff check . && uv run ruff format --check . && uv run mypy protoka
-./scripts/publish.sh <user>/protoka --dry-run   # tests, image build, smoke test as UID 568
+./scripts/publish.sh <user>/protoka --dry-run   # tests, image build, smoke tests (default and arbitrary UID)
 ```
 
 The tests run real libtorrent sessions against local seeders, generate MKV/AVI media and fonts on the fly, and
@@ -173,7 +176,8 @@ Images are published only after they pass the same checks locally (`scripts/publ
   release before anything is pushed (`scripts/scan.sh`). Accepted exceptions live in `.trivyignore.yaml`, each with
   a reason and an expiry date.
 - **Hardened image.** Base images are pinned by digest. `apk upgrade` runs at build time, and pip is removed from
-  the runtime image. The container runs as a non-root user (UID 568 by default; override it with `--user`).
+  the runtime image. The container runs as a non-root user (UID 10001; override it with `--user`), and `/data` is writable
+  only for that user and for GID 0 (arbitrary UIDs, OpenShift style), not for everyone.
 - **CI on every push and PR.** It runs ruff with the bandit rules, mypy, the tests, the Trivy scans (reports go to
   *Security â†’ Code scanning*), CodeQL and [zizmor](https://docs.zizmor.sh) on the workflows. All actions are pinned
   by commit SHA.

@@ -59,10 +59,35 @@ def version_banner() -> str:
     )
 
 
+def ensure_writable(path: Path) -> None:
+    """Create `path` and prove it is writable, or stop with the owner and a hint instead of a traceback.
+
+    In a container this is the usual first-run problem: a volume or a host directory owned by another UID.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-test"
+        probe.touch()
+        probe.unlink()
+    except OSError as e:
+        owner = ""
+        for p in (path, *path.parents):  # the nearest directory we can stat: a 0770 parent hides its children
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            owner = f", {p} belongs to {st.st_uid}:{st.st_gid} (mode {st.st_mode & 0o7777:o})"
+            break
+        raise SystemExit(
+            f"{path} is not writable for {os.getuid()}:{os.getgid()} ({e.strerror}){owner}. "
+            "Run as the owner of that directory (docker: --user UID:GID) or let this user write to it."
+        ) from e
+
+
 async def serve(args: argparse.Namespace) -> None:
     log.info("Starting %s", version_banner())
     app_path = args.app_path or default_app_path()
-    app_path.mkdir(parents=True, exist_ok=True)
+    ensure_writable(app_path)
     log.info("Using app path -> %s", app_path)
     settings = Settings(app_path)
     try:

@@ -90,31 +90,35 @@ BUILD_ARGS=(--platform linux/amd64 --build-arg VERSION="$VERSION" -t "$IMAGE" -t
 step "build $IMAGE (linux/amd64)"
 docker build "${BUILD_ARGS[@]}" .
 
-step "smoke test: run as 568:568 (TrueNAS 'apps'), wait for /heartbeat"
-WORK=$(mktemp -d)
+step "smoke test: default user on a fresh volume, wait for /heartbeat"
 NAME="stremio-smoke-$$"
+VOL="stremio-smoke-$$"
+VOL2="stremio-smoke-uid-$$"
 cleanup() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
-    docker run --rm -v "$WORK:/w" alpine:3 rm -rf /w/data >/dev/null 2>&1 || true
-    rm -rf "$WORK"
+    docker volume rm -f "$VOL" "$VOL2" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-mkdir -p "$WORK/data"
-chmod 0777 "$WORK/data"
 # host networking: the bridge network needs NAT support that some hosts lack; the test only talks to localhost
 SMOKE_PORT=11499
-docker run -d --name "$NAME" --network host --user 568:568 \
+wait_heartbeat() {
+    for _ in $(seq 1 60); do
+        if curl -sf -m 1 "http://127.0.0.1:$SMOKE_PORT/heartbeat" >/dev/null; then return 0; fi
+        sleep 0.5
+    done
+    docker logs "$NAME"
+    echo "smoke test: no heartbeat ($1)" >&2
+    exit 1
+}
+# a new named volume gets the image's /data (10001:0, 0770): the default user must be able to write to it
+docker run -d --name "$NAME" --network host \
     -e PORT="$SMOKE_PORT" -e BT_PORT=42099 -e CACHE_SIZE=1G \
-    -v "$WORK/data:/data" "$IMAGE" >/dev/null
-for _ in $(seq 1 60); do
-    if curl -sf -m 1 "http://127.0.0.1:$SMOKE_PORT/heartbeat" >/dev/null; then break; fi
-    sleep 0.5
-done
-curl -sf -m 2 "http://127.0.0.1:$SMOKE_PORT/heartbeat" >/dev/null || { docker logs "$NAME"; echo "smoke test: no heartbeat" >&2; exit 1; }
+    -v "$VOL:/data" "$IMAGE" >/dev/null
+wait_heartbeat "default user"
 SETTINGS=$(curl -sf -m 5 "http://127.0.0.1:$SMOKE_PORT/settings")
 echo "$SETTINGS" | grep -q '"btListenPort": 42099' || { echo "smoke test: BT_PORT not applied" >&2; exit 1; }
 echo "$SETTINGS" | grep -q '"cacheRoot": "/data"' || { echo "smoke test: CACHE_ROOT not applied" >&2; exit 1; }
-[[ "$(docker exec "$NAME" id -u)" == "568" ]] || { echo "smoke test: not running as 568" >&2; exit 1; }
+[[ "$(docker exec "$NAME" id -u)" == "10001" ]] || { echo "smoke test: not running as 10001" >&2; exit 1; }
 INNER=$(docker exec "$NAME" python -c "import protoka; print(protoka.__version__)")
 [[ "$INNER" == "$VERSION" ]] || { echo "smoke test: image reports version $INNER, expected $VERSION" >&2; exit 1; }
 FONTS=$(docker exec "$NAME" python -c "from protoka.subs import fallback
@@ -123,8 +127,17 @@ for family in "Noto Sans" "Noto Serif" "Noto Sans Mono" "Noto Sans CJK JP" "Noto
     [[ "$FONTS" == *"'$family'"* ]] || { echo "smoke test: fallback font $family is missing ($FONTS)" >&2; exit 1; }
 done
 docker stop -t 30 "$NAME" >/dev/null   # graceful stop must save the DHT state
-[[ -s "$WORK/data/config/bt-session.state" ]] || { docker logs "$NAME"; echo "smoke test: no DHT state saved on stop" >&2; exit 1; }
-[[ -d "$WORK/data/stremio-cache" ]] || { echo "smoke test: no cache directory under /data" >&2; exit 1; }
+docker run --rm -v "$VOL:/data" --entrypoint sh "$IMAGE" -c \
+    'test -s /data/config/bt-session.state && test -d /data/stremio-cache && test "$(stat -c %a /data)" = 770' \
+    || { docker logs "$NAME"; echo "smoke test: no DHT state / cache dir under /data, or /data is not 0770" >&2; exit 1; }
+docker rm -f "$NAME" >/dev/null
+
+step "smoke test: an arbitrary UID without a group (runs with GID 0) on a fresh volume"
+docker run -d --name "$NAME" --network host --user 4242 \
+    -e PORT="$SMOKE_PORT" -e BT_PORT=42099 -e CACHE_SIZE=1G \
+    -v "$VOL2:/data" "$IMAGE" >/dev/null
+wait_heartbeat "--user 4242"
+docker rm -f "$NAME" >/dev/null
 echo "smoke test passed"
 
 step "security: image"

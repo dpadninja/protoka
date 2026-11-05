@@ -26,8 +26,11 @@ LABEL org.opencontainers.image.title="protoka" \
       org.opencontainers.image.version="${VERSION}"
 # libstdc++: C++ runtime for the libtorrent extension; tini: proper signal handling as PID 1;
 # ffmpeg: remuxing non-MKV videos with their subtitles; libarchive-tools (bsdtar): fonts in RAR archives.
-# User 568:568 = "apps" on TrueNAS, the owner of app datasets. Any other UID works too, as long as
-# /data is writable for it (world-writable here for the unmounted default).
+# User: protoka, UID/GID 10001 (high, so it does not collide with users of the host). /data belongs to
+# 10001 with group 0 and mode 0770 (the OpenShift convention): the default user owns it, and an arbitrary UID
+# started without a group (`--user 1234`, OpenShift) runs with GID 0 and can write to it as well. Nobody else
+# can. A bind mount (a host dir, a TrueNAS dataset) keeps the permissions of the host: run the container as the
+# owner of that directory (`--user 568:568` for TrueNAS "apps"); the image permissions do not matter then.
 # Fonts: substitutes for subtitle fonts a torrent lacks (analysis/17-font-fallback.md): Noto (Latin, Cyrillic,
 # Greek), Noto CJK (Japanese/Chinese/Korean), Liberation (metric twins of Arial / Times New Roman / Courier New).
 # apk upgrade: Alpine security fixes released after the base image was built go in right away.
@@ -37,12 +40,13 @@ RUN apk upgrade --no-cache \
     && apk add --no-cache libstdc++ tini ffmpeg libarchive-tools font-noto font-noto-cjk font-liberation \
     && python -m pip uninstall -y -q pip \
     && rm -rf /usr/local/lib/python3.13/ensurepip /usr/local/bin/pip* \
-    && addgroup -g 568 apps \
-    && adduser -D -u 568 -G apps -h /home/apps apps \
+    && addgroup -g 10001 protoka \
+    && adduser -D -H -h /data -s /sbin/nologin -u 10001 -G protoka protoka \
     && mkdir -p /data \
-    && chown 568:568 /data \
-    && chmod 0777 /data
+    && chown 10001:0 /data \
+    && chmod 0770 /data
 COPY --from=build /app/.venv /app/.venv
+# HOME=/tmp: writable for any UID, including ones without a passwd entry.
 # Configuration is environment-only (set them in the TrueNAS Custom App form):
 #   PORT        HTTP API port (11470)            BT_PORT     BitTorrent TCP+uTP port (42069)
 #   CACHE_SIZE  cache limit: 50G, 0, unlimited   LOG_LEVEL   INFO / DEBUG
@@ -58,7 +62,7 @@ ENV PATH=/app/.venv/bin:$PATH \
     HOST=0.0.0.0 \
     PORT=11470 \
     BT_PORT=42069
-USER 568:568
+USER 10001:10001
 # mount /data (a host path / dataset on TrueNAS, a named volume elsewhere) or a new container starts cold
 VOLUME ["/data"]
 # HTTP API
