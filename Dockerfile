@@ -7,16 +7,23 @@ FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d
 
 FROM python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8 AS build
 COPY --from=uv /uv /bin/uv
+# binutils: strip for the native extensions below (build stage only)
+RUN apk add --no-cache binutils
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/app/.venv
 WORKDIR /src
-# dependencies first (cached layer)
+# dependencies first (cached layer); the uv cache mount keeps downloaded wheels between builds, so a uv.lock
+# change re-downloads only what changed. It never reaches the image (UV_LINK_MODE=copy).
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project --no-cache
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project
 COPY README.md LICENSE ./
 COPY protoka ./protoka
 # the build context has no .git: the version (the git tag, from scripts/publish.sh) comes in as an argument
 ARG VERSION=0.0.0
-RUN SETUPTOOLS_SCM_PRETEND_VERSION="$VERSION" uv sync --locked --no-dev --no-editable --no-cache
+RUN --mount=type=cache,target=/root/.cache/uv \
+    SETUPTOOLS_SCM_PRETEND_VERSION="$VERSION" uv sync --locked --no-dev --no-editable
+# wheels ship native extensions with symbol and debug sections (libtorrent alone: 37 → 18 MB): drop them
+RUN find /app/.venv -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded {} +
 
 FROM python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8
 ARG VERSION=dev
@@ -45,7 +52,8 @@ RUN apk upgrade --no-cache \
     && mkdir -p /data \
     && chown 10001:0 /data \
     && chmod 0770 /data
-COPY --from=build /app/.venv /app/.venv
+# --link: this layer does not depend on the ones below it, so a new base image or apk upgrade reuses it
+COPY --link --from=build /app/.venv /app/.venv
 # HOME=/tmp: writable for any UID, including ones without a passwd entry.
 # Configuration is environment-only (set them in the TrueNAS Custom App form):
 #   PORT        HTTP API port (11470)            BT_PORT     BitTorrent TCP+uTP port (42069)
