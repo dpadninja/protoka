@@ -12,11 +12,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TRIVY_IMAGE="aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c"
+# shellcheck disable=SC2054  # HIGH,CRITICAL is one argument
 POLICY=(--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --ignorefile .trivyignore.yaml --table-mode detailed)
 
+DOCKER_SOCK=()  # only the image scan needs the Docker socket (it reads the image from the daemon)
+
 trivy() {
-    docker run --rm \
-        -v /var/run/docker.sock:/var/run/docker.sock \
+    docker run --rm "${DOCKER_SOCK[@]}" \
         -v protoka-trivy-cache:/root/.cache \
         -v "$PWD:/src:ro" -w /src \
         -e TRIVY_DISABLE_VEX_NOTICE=1 \
@@ -38,6 +40,7 @@ case "${1:-}" in
         ;;
     image)
         ref=${2:?usage: $0 image <ref>}
+        DOCKER_SOCK=(-v /var/run/docker.sock:/var/run/docker.sock)
         echo "scan: image $ref"
         trivy image --quiet --scanners vuln,secret "${POLICY[@]}" "$ref"
         sarif image --scanners vuln,secret "$ref"

@@ -94,9 +94,11 @@ step "smoke test: default user on a fresh volume, wait for /heartbeat"
 NAME="stremio-smoke-$$"
 VOL="stremio-smoke-$$"
 VOL2="stremio-smoke-uid-$$"
+META=""
 cleanup() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker volume rm -f "$VOL" "$VOL2" >/dev/null 2>&1 || true
+    if [[ -n "$META" ]]; then rm -f "$META"; fi
 }
 trap cleanup EXIT
 # host networking: the bridge network needs NAT support that some hosts lack; the test only talks to localhost
@@ -157,7 +159,6 @@ if (( ${#ATTEST[@]} )); then
         exit 1
     fi
     DIGEST=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$META")
-    rm -f "$META"
     # what was pushed must be what was scanned: compare the layer lists (rootfs diff ids)
     LOCAL_LAYERS=$(docker image inspect --format '{{json .RootFS.Layers}}' "$IMAGE")
     PUSHED_LAYERS=$(docker buildx imagetools inspect "$REPO@$DIGEST" --format '{{json .Image}}' \
@@ -186,5 +187,8 @@ else
 fi
 step "published"
 echo "image:  $IMAGE"
-[[ -n "$DIGEST" ]] && echo "digest: $DIGEST   (pin $REPO@$DIGEST for a reproducible install)"
-[[ -n "${GITHUB_OUTPUT:-}" && -n "$DIGEST" ]] && echo "digest=$DIGEST" >>"$GITHUB_OUTPUT"
+# `if`, not `[[ … ]] && …`: a false test as the last command would make a successful release exit 1
+if [[ -n "$DIGEST" ]]; then
+    echo "digest: $DIGEST   (pin $REPO@$DIGEST for a reproducible install)"
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then echo "digest=$DIGEST" >>"$GITHUB_OUTPUT"; fi
+fi
