@@ -15,9 +15,9 @@ COPY README.md LICENSE ./
 COPY protoka ./protoka
 # the context has no .git: scripts/build.sh and publish.sh pass the version in
 ARG VERSION=0.0.0
-# strip: wheels ship native extensions with debug sections (libtorrent 37 → 18 MB)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    SETUPTOOLS_SCM_PRETEND_VERSION="$VERSION" uv sync --locked --no-dev --no-editable \
+# --no-cache: uv's cache key for the project ignores SETUPTOOLS_SCM_PRETEND_VERSION, so a cached wheel would carry
+# an old version. strip: wheels ship native extensions with debug sections (libtorrent 37 → 18 MB).
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="$VERSION" uv sync --locked --no-dev --no-editable --no-cache \
     && find /app/.venv -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded {} +
 
 FROM python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8
