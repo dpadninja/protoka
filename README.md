@@ -41,7 +41,6 @@ the Stremio app and point it at protoka.
 
 ## Quick start
 
-### From Docker
 The image is on Docker Hub: [`horsetail/protoka`](https://hub.docker.com/r/horsetail/protoka).
 
 ```sh
@@ -59,15 +58,7 @@ docker run -d --name protoka --restart unless-stopped \
   `--user 568:568` to keep using it.
 - **Peers:** forward the BitTorrent port 42069 (TCP and UDP) on your router. On Linux, `--network host` instead of
   the `-p` options lets protoka open it via UPnP / NAT-PMP itself.
-
-### From source
-```sh
-uv sync
-uv run protoka --port 11470 --app-path ./data --bt-port 42069
-```
-Requires Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/). `ffmpeg`/`ffprobe` are needed for AVI/MP4 remuxing
-and raw audio, `bsdtar` for fonts in RAR archives, and the Noto, Noto CJK and Liberation font packages for
-replacing fonts a torrent lacks. Data goes to `./data`.
+- **Configuration:** environment variables (`-e CACHE_SIZE=100G`), see [Configuration](#configuration).
 
 ### Check
 `http://<host>:11470/heartbeat` returns `{"success": true}`.
@@ -142,11 +133,33 @@ The rest of the settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`�
 
 ## Development
 
+### Run from source
 ```sh
 uv sync                     # dependencies (always via uv)
+uv run protoka --port 11470 --app-path ./data --bt-port 42069
+```
+Requires Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/). `ffmpeg`/`ffprobe` are needed for AVI/MP4 remuxing
+and raw audio, `bsdtar` for fonts in RAR archives, and the Noto, Noto CJK and Liberation font packages for
+replacing fonts a torrent lacks. Data goes to `./data`.
+
+### Build and run the image locally
+```sh
+./scripts/build.sh                    # builds protoka:dev from the work tree (uncommitted changes included)
+docker run --rm --name protoka-dev \
+  -p 11470:11470 -p 42069:42069/tcp -p 42069:42069/udp \
+  -v protoka-dev-data:/data \
+  protoka:dev
+```
+`./scripts/build.sh <name:tag>` picks another image name. The script only builds: no tests, scans or push. The
+image version is the package version of the tree (`1.2.4.devN+g<sha>` between tags). The container runs in the
+foreground with its log in the terminal; Ctrl+C stops it, and the `protoka-dev-data` volume keeps its state. Stop
+a running `protoka` container first, or map other host ports (`-p 11471:11470`).
+
+### Checks
+```sh
 uv run pytest               # fully offline, ~80 s; ffmpeg-dependent tests are skipped without ffmpeg
 uv run ruff check . && uv run ruff format --check . && uv run mypy protoka
-./scripts/publish.sh <user>/protoka --dry-run   # tests, image build, smoke tests (default and arbitrary UID)
+./scripts/publish.sh <user>/protoka --dry-run   # tests, scans, image build, smoke tests (default and arbitrary UID)
 ```
 
 The tests run real libtorrent sessions against local seeders, generate MKV/AVI media and fonts on the fly, and

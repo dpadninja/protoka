@@ -1,8 +1,8 @@
-.venv
-.idea
-.git
-.ruff_cache
-.pytest_cache
+# Whitelist: the build COPYs only these, so nothing else (caches, notes, tests, .git) is sent as context
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!protoka/
 **/__pycache__
-analysis
-tests

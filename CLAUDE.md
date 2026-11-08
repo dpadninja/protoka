@@ -19,6 +19,7 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
 - Lint/format/types: `uv run ruff check .`, `uv run ruff format .`, `uv run mypy protoka`
 - Absolute imports only (`from protoka.x import y`; ruff TID252 enforces it)
 - Docker image (one container, env-only config, one `/data` mount):
+  build only (no tests/scans/push) with `./scripts/build.sh [image]` (default `protoka:dev`, version from hatch-vcs);
   publish with `./scripts/publish.sh <user>/protoka [--dry-run] [--force]` (tests, build, smoke tests as the default UID 10001 and an arbitrary UID, push).
   The version is the **git tag** (`git tag v1.2.3`; hatch-vcs, `dynamic = ["version"]`): publishing needs a tagged,
   clean HEAD, `--dry-run` also works untagged (1.2.4.devN+g<sha>). The image build has no `.git` and gets it as
