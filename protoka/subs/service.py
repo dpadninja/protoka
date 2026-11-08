@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 from protoka.stream import read_file
 from protoka.subs import ass, convert, fonts, matching, names
-from protoka.subs.archives import ArchiveUnsupported, extract_fonts
 from protoka.subs.fallback import FallbackLibrary, Substitution
 from protoka.subs.model import Assignment, FileName, FontFace, Match, SubtitleTrack
 
@@ -23,7 +22,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 MAX_SUBTITLE_BYTES = 20 * 1024 * 1024
-MAX_FONT_SOURCE_BYTES = 100 * 1024 * 1024  # one font file or one font archive
+MAX_FONT_SOURCE_BYTES = 100 * 1024 * 1024  # one font file
 MAX_FONTS_TOTAL_BYTES = 100 * 1024 * 1024  # attached to one video
 DOWNLOAD_CONCURRENCY = 8
 
@@ -41,7 +40,7 @@ class SubtitleService:
         # external audio per torrent file index: "mka" | "repacking" | "repacked" | "skipped: …"
         self.audio_status: dict[int, str] = {}
         self._tracks: dict[int, SubtitleTrack | SubtitleError] = {}
-        self._faces: dict[str, list[FontFace]] = {}  # source id -> faces (an archive gives several)
+        self._faces: dict[str, list[FontFace]] = {}  # source id -> its face ([] if unreadable)
         self._sem = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
         self.warnings: list[str] = []
         self.font_fallback: dict[int, list[Substitution]] = {}  # video idx -> replaced fonts, explained
@@ -120,8 +119,8 @@ class SubtitleService:
         try:
             async with self._sem:
                 data = await read_file(self.engine, src.file_idx, MAX_FONT_SOURCE_BYTES)
-            faces = await asyncio.to_thread(_faces_from, src, data)  # unzip + fontTools parsing
-        except (ValueError, ArchiveUnsupported) as e:
+            faces = [await asyncio.to_thread(fonts.make_face, src.id, src.path, data)]  # fontTools parsing
+        except ValueError as e:
             self.warn(f"fonts {src.path}: {e}")
         self._faces[src.id] = faces
         return faces
@@ -180,23 +179,15 @@ class SubtitleService:
         return out, plan.faces
 
     async def face(self, face_id: str) -> FontFace | None:
-        """A single font by id ("12" or "13/Fonts/a.ttf"), for the HTTP API."""
-        source_id = face_id.split("/", 1)[0]
-        if not source_id.isdigit():
+        """A font file by its file index ("12"), for the HTTP API; None unless that file is a font."""
+        if not face_id.isdigit():
             return None
-        idx = int(source_id)
-        if not (0 <= idx < len(self.files)):
+        idx = int(face_id)
+        if not (0 <= idx < len(self.files)) or self.files[idx].kind is not names.Kind.FONT:
             return None
         f = self.files[idx]
-        src = fonts.FontSource(source_id, idx, f.path, f.kind is names.Kind.ARCHIVE, f.size)
-        return next((x for x in await self._load_source(src) if x.id == face_id), None)
-
-
-def _faces_from(src: fonts.FontSource, data: bytes) -> list[FontFace]:
-    """Pure: a font file or a font archive → faces (runs in a worker thread)."""
-    if src.is_archive:
-        return [fonts.make_face(f"{src.id}/{m}", m, d) for m, d in extract_fonts(src.path, data)]
-    return [fonts.make_face(src.id, src.path, data)]
+        src = fonts.FontSource(face_id, idx, f.path, f.size)
+        return next(iter(await self._load_source(src)), None)
 
 
 def with_text(track: SubtitleTrack, text: str) -> SubtitleTrack:

@@ -138,7 +138,7 @@ async def read_range(engine: Engine, file_idx: int, start: int, end: int) -> byt
 
 
 async def read_file(engine: Engine, file_idx: int, max_bytes: int) -> bytes:
-    """A whole (small) torrent file: subtitles, fonts, font archives."""
+    """A whole (small) torrent file: subtitles, fonts."""
     size = engine.files[file_idx]["length"]  # type: ignore[index]
     if size > max_bytes:
         raise ValueError(f"file {file_idx} is too large ({size} > {max_bytes} bytes)")

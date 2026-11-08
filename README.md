@@ -139,7 +139,7 @@ uv sync                     # dependencies (always via uv)
 uv run protoka --port 11470 --app-path ./data --bt-port 42069
 ```
 Requires Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/). `ffmpeg`/`ffprobe` are needed for AVI/MP4 remuxing
-and raw audio, `bsdtar` for fonts in RAR archives, and the Noto, Noto CJK and Liberation font packages for
+and raw audio, and the Noto, Noto CJK and Liberation font packages for
 replacing fonts a torrent lacks. Data goes to `./data`.
 
 ### Build and run the image locally
@@ -208,7 +208,7 @@ Images are published only after they pass the same checks locally (`scripts/publ
 protoka's own code is MIT-licensed. It depends on, and its Docker image ships:
 
 - **Python packages:** libtorrent (BSD), aiohttp (Apache-2.0), fontTools (MIT), psutil (BSD), regex (Apache-2.0),
-  charset-normalizer (MIT), rarfile (ISC), py7zr and its codecs (LGPL-2.1+). They are installed unmodified.
+  charset-normalizer (MIT). They are installed unmodified.
 - **ffmpeg** (LGPL/GPL, Alpine package). It is run as a separate process, not linked.
 - **Fonts:** Noto, Noto CJK and Liberation, all under the SIL Open Font License 1.1. They are unmodified in the
   image. Subsets are made at runtime, on your machine, for your own playback.

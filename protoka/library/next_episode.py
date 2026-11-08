@@ -6,7 +6,7 @@ another season is a different series and never "next". Files without episode num
 natural order in the same folder.
 
 An episode = the video and every file playing it needs on disk: matched subtitles, matched external audio
-and the font sources (font files and archives) its subtitles may use. The next episode is downloaded whole,
+and the font files its subtitles may use. The next episode is downloaded whole,
 all of these files at file priority, so their data goes to the real files (never to libtorrent's part file:
 analysis/18-part-file.md).
 """

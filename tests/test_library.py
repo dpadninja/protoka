@@ -130,10 +130,10 @@ def test_an_episode_is_its_video_with_subtitles_audio_and_font_sources():
         "T/RUS Sound/[G] Title - 02.mka",
         "T/RUS Sound/[G] Title - 01.mka",
         "T/Fonts/Font.ttf",
-        "T/fonts.rar",
+        "T/fonts.rar",  # archives are not unpacked, so not part of an episode
     )
-    assert next_episode.episode_files(fs, 1) == [1, 2, 3, 5, 6]
-    assert next_episode.episode_files(fs, 0) == [0, 4, 5, 6]
+    assert next_episode.episode_files(fs, 1) == [1, 2, 3, 5]
+    assert next_episode.episode_files(fs, 0) == [0, 4, 5]
 
 
 # -- eviction ------------------------------------------------------------------------------------

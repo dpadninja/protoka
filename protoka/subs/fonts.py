@@ -1,8 +1,9 @@
 """Steps 3 and 5: where the fonts are, what families they contain, which ones a script needs. Pure.
 
-Fonts in old releases: loose files in `Fonts/` (or `[Fonts]`, `Шрифты/`) next to the videos, or one
-archive (`Fonts.rar`, `fonts.7z`, `Шрифты.zip`). A font file's *name* says little about its family,
-so the family names come from the font itself (OpenType `name` table).
+Fonts in releases: loose files in `Fonts/` (or `[Fonts]`, `Шрифты/`) next to the videos. Font archives
+(`Fonts.rar`…) are not unpacked: untrusted archives are a risk, and the bundled fallback replaces what is
+missing. A font file's *name* says little about its family, so the family names come from the font itself
+(OpenType `name` table).
 """
 
 from __future__ import annotations
@@ -15,23 +16,11 @@ from pathlib import PurePosixPath
 from fontTools.ttLib import TTCollection, TTFont
 
 from protoka.subs.model import FileName, FontFace, FontSource, Kind
-from protoka.subs.names import FONT_FOLDER_WORDS, folder_tokens
 
 log = logging.getLogger(__name__)
 
 # name table IDs: 1 family, 4 full name, 6 PostScript name, 16 typographic family
 _NAME_IDS = (1, 4, 6, 16)
-
-
-def _in_font_folder(f: FileName) -> bool:
-    return any(set(folder_tokens(folder)) & FONT_FOLDER_WORDS for folder in f.folders)
-
-
-def _is_font_archive(f: FileName) -> bool:
-    if f.kind is not Kind.ARCHIVE:
-        return False
-    name_tokens = set(folder_tokens(f.stem))
-    return bool(name_tokens & FONT_FOLDER_WORDS) or _in_font_folder(f) or "font" in f.stem.lower()
 
 
 def _shared_depth(a: Sequence[str], b: Sequence[str]) -> int:
@@ -44,15 +33,10 @@ def _shared_depth(a: Sequence[str], b: Sequence[str]) -> int:
 
 
 def locate(files: Sequence[FileName], video: FileName) -> list[FontSource]:
-    """Font files and font archives, the ones closest to the video first."""
-    found = [f for f in files if f.kind is Kind.FONT or _is_font_archive(f)]
-    found.sort(key=lambda f: (-_shared_depth(f.folders, video.folders), f.kind is Kind.ARCHIVE, f.path))
-    return [
-        FontSource(
-            id=str(f.index), file_idx=f.index, path=f.path, is_archive=f.kind is Kind.ARCHIVE, size=f.size
-        )
-        for f in found
-    ]
+    """Font files, the ones closest to the video first."""
+    found = [f for f in files if f.kind is Kind.FONT]
+    found.sort(key=lambda f: (-_shared_depth(f.folders, video.folders), f.path))
+    return [FontSource(id=str(f.index), file_idx=f.index, path=f.path, size=f.size) for f in found]
 
 
 def mime_type(filename: str) -> str:

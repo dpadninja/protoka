@@ -1,11 +1,9 @@
-"""End-to-end: a torrent with sidecar subtitles and a fonts archive, served with them embedded."""
+"""End-to-end: a torrent with sidecar subtitles and a fonts folder, served with them embedded."""
 
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -35,10 +33,6 @@ def anime(make_seed, tmp_path: Path):
     ep1 = make_video(media / "ep1.mkv", 12).read_bytes()
     ep2 = make_video(media / "ep2.mkv", 6).read_bytes()
     ep3 = make_video(media / "ep3.avi", 4, container="avi").read_bytes()
-    zbuf = io.BytesIO()
-    with zipfile.ZipFile(zbuf, "w") as z:
-        z.writestr("TestSans.ttf", make_font("Test Sans"))
-        z.writestr("Unused.ttf", make_font("Unused Font"))
     files = {
         "[Grp] Title - 01 [ABCD1234].mkv": ep1,
         "[Grp] Title - 02 [BCDE2345].mkv": ep2,
@@ -51,7 +45,8 @@ def anime(make_seed, tmp_path: Path):
         ).encode("cp1251"),
         "RUS Subs/[Grp] Title - 02.ass": b"[Script Info]\nbroken: yes\n",  # no [Events]
         "Title - 03.srt": srt_script([("00:00:01,000", "00:00:02,000", "AVI line")]).encode(),
-        "Fonts.zip": zbuf.getvalue(),
+        "Fonts/TestSans.ttf": make_font("Test Sans"),
+        "Fonts/Unused.ttf": make_font("Unused Font"),
     }
     return make_seed(files, top="Title")
 
@@ -81,7 +76,7 @@ async def test_subtitles_json_explains_matches(client, torrent_session, anime):
     assert sub["lang"] == "rus" and sub["format"] == "ass"
     rules = {r["rule"] for r in sub["match"]["reasons"]}
     assert {"same_episode", "same_series"} <= rules and "different_episode" not in rules
-    assert [f["path"] for f in info["fonts"]] == ["Title/Fonts.zip"]
+    assert [f["path"] for f in info["fonts"]] == ["Title/Fonts/TestSans.ttf", "Title/Fonts/Unused.ttf"]
     assert info["mux"] is None  # nothing built yet
 
 
@@ -184,11 +179,15 @@ async def test_subtitle_and_font_endpoints(client, torrent_session, anime):
         assert vtt.startswith("WEBVTT")
         assert (await client.get(f"/{anime.info_hash}/{idx}/subtitles/{sid + 999}.srt")).status == 404
 
-        zip_idx = file_index(files, "Fonts.zip")
-        font = await client.get(f"/{anime.info_hash}/fonts/{zip_idx}/TestSans.ttf")
+        font = await client.get(f"/{anime.info_hash}/fonts/{file_index(files, 'TestSans.ttf')}")
         assert font.status == 200
         assert "test sans" in families(await font.read())  # (font bytes embed a timestamp)
-        assert (await client.get(f"/{anime.info_hash}/fonts/{zip_idx}/Nope.ttf")).status == 404
+        for not_a_font in (
+            file_index(files, "Title - 03.srt"),
+            "9999",
+            "1/x.ttf",
+        ):
+            assert (await client.get(f"/{anime.info_hash}/fonts/{not_a_font}")).status == 404
 
 
 async def test_mux_can_be_disabled(client, torrent_session, anime, tmp_path):

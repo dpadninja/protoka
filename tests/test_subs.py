@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import io
-import shutil
-import zipfile
-
-import py7zr
 import pytest
 
-from protoka.subs import archives, ass, convert, fonts, matching, names
+from protoka.subs import ass, convert, fonts, matching, names
 from protoka.subs.model import Episode, Kind, Match
 from protoka.subs.service import build_track
 from tests.media import ass_script, make_font, srt_script
@@ -302,7 +297,7 @@ def test_build_track_srt_and_ass():
     assert a.codec_id == "S_TEXT/ASS" and a.font_names == {"test sans"}
 
 
-# -- fonts / archives ----------------------------------------------------------------------------
+# -- fonts ----------------------------------------------------------------------------------------
 def test_font_families_and_pick():
     face = fonts.make_face("1", "Fonts/TestSans.ttf", make_font("Test Sans"))
     assert "test sans" in face.families
@@ -321,41 +316,9 @@ def test_locate_fonts_nearest_first():
         "T/Title - 01.mkv",
         "T/Fonts/b.ttf",
         "Other/Fonts/far.ttf",
-        "T/Fonts.rar",
-        "T/Extras/readme.zip",  # not a font archive
+        "T/Fonts.rar",  # archives are not unpacked
         "T/Шрифты/a.otf",
     ]
     files = [names.parse_file(i, p) for i, p in enumerate(paths)]
     located = [s.path for s in fonts.locate(files, files[0])]
-    assert located == ["T/Fonts/b.ttf", "T/Шрифты/a.otf", "T/Fonts.rar", "Other/Fonts/far.ttf"]
-
-
-def test_extract_fonts_zip_and_7z(tmp_path):
-    font = make_font("Zip Sans")
-    zbuf = io.BytesIO()
-    with zipfile.ZipFile(zbuf, "w") as z:
-        z.writestr("Fonts/ZipSans.ttf", font)
-        z.writestr("readme.txt", "x")
-    assert archives.extract_fonts("Fonts.zip", zbuf.getvalue()) == [("Fonts/ZipSans.ttf", font)]
-
-    sbuf = io.BytesIO()
-    with py7zr.SevenZipFile(sbuf, "w") as z:
-        z.writestr(font, "Fonts/ZipSans.ttf")
-        z.writestr(b"x", "readme.txt")
-    assert archives.extract_fonts("fonts.7z", sbuf.getvalue()) == [("Fonts/ZipSans.ttf", font)]
-
-
-def test_extract_fonts_broken_archive():
-    with pytest.raises(archives.ArchiveUnsupported):
-        archives.extract_fonts("Fonts.zip", b"garbage")
-
-
-@pytest.mark.skipif(not shutil.which("rar"), reason="needs the `rar` tool to create a test archive")
-def test_extract_fonts_rar(tmp_path):
-    import subprocess
-
-    (tmp_path / "F.ttf").write_bytes(make_font("Rar Sans"))
-    subprocess.run(
-        ["rar", "a", "-ep", str(tmp_path / "f.rar"), str(tmp_path / "F.ttf")], check=True, capture_output=True
-    )
-    assert archives.extract_fonts("Fonts.rar", (tmp_path / "f.rar").read_bytes())[0][0] == "F.ttf"
+    assert located == ["T/Fonts/b.ttf", "T/Шрифты/a.otf", "Other/Fonts/far.ttf"]

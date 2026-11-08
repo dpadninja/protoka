@@ -25,13 +25,12 @@ ARG VERSION=0.0.0
 LABEL org.opencontainers.image.title="protoka" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="MIT"
-# libstdc++: libtorrent; tini: PID 1; ffmpeg: remuxing; libarchive-tools: fonts in RAR archives;
-# fonts: substitutes for subtitle fonts a torrent lacks.
+# libstdc++: libtorrent; tini: PID 1; ffmpeg: remuxing; fonts: substitutes for subtitle fonts a torrent lacks.
 # apk upgrade: Alpine fixes newer than the base image.
 # pip is removed: nothing is installed at runtime, and it only adds scanner findings.
 # /data: owner 10001, group 0, mode 0770. Any UID started without a group runs with GID 0, so it can write too.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache libstdc++ tini ffmpeg libarchive-tools font-noto font-noto-cjk font-liberation \
+    && apk add --no-cache libstdc++ tini ffmpeg font-noto font-noto-cjk font-liberation \
     && python -m pip uninstall -y -q pip \
     && rm -rf /usr/local/lib/python3.13/ensurepip /usr/local/bin/pip* \
     && install -d -o 10001 -g 0 -m 0770 /data
