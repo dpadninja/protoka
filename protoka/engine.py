@@ -21,6 +21,16 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PIECE_CACHE_BYTES = 64 * 1024 * 1024
+# A read can fail for a while although the piece is downloaded: when a file goes from priority 0 to wanted,
+# libtorrent moves its pieces out of the part file, and a piece shared with a neighbouring file cannot be read
+# meanwhile (analysis/18-part-file.md). Retry for this long before giving up.
+READ_RETRY_SECONDS = 10.0
+# libtorrent itself also hits that window ("file too short" / ENOENT, often dozens of alerts at once) and
+# stops the whole torrent. Resume it after this delay — one resume per burst — at most ERROR_RECOVERY_MAX
+# times within ERROR_RECOVERY_WINDOW seconds; after that the error stays.
+ERROR_RECOVERY_DELAY = 1.5
+ERROR_RECOVERY_MAX = 3
+ERROR_RECOVERY_WINDOW = 60.0
 
 
 class EngineError(Exception):
@@ -100,6 +110,9 @@ class Engine:
         self.created_at = time.time()
         self.metadata_ready = asyncio.Event()
         self.error: str | None = None
+        self._recoveries: list[float] = []  # loop times of automatic clear_error() calls
+        self._recovery: asyncio.TimerHandle | None = None  # a scheduled clear_error()
+        self._gave_up = False  # the error stays: logged once
         self.destroyed = False
         self._loop = asyncio.get_running_loop()
         self._waiters = _Waiters()
@@ -108,6 +121,7 @@ class Engine:
         self._deadline_refs: Counter[int] = Counter()
         self.selections: list[Selection] = []
         self.open_streams = 0
+        self.internal_reads = 0  # our ffmpeg reading a file of this torrent (repack): keeps it downloading
         self.inactive_handle: asyncio.TimerHandle | None = None
         self.sources: dict[str, SourceStats] = {t: SourceStats(f"tracker:{t}") for t in trackers}
         self.sources["dht"] = SourceStats(f"dht:{info_hash}")
@@ -207,8 +221,7 @@ class Engine:
             src.numFound += a.num_peers
             src.lastStarted = time.time()
         elif name == "torrent_error_alert":
-            self.error = _alert_message(a)
-            log.error("Engine error for %s: %s", self.info_hash, self.error)
+            self._on_error(_alert_message(a))
         elif name == "hash_failed_alert":
             log.warning("Engine invalid piece %s for %s", a.piece_index, self.info_hash)
         elif name == "save_resume_data_alert":
@@ -236,6 +249,34 @@ class Engine:
                 fut.set_result(None)
         if self._deadline_refs.get(piece):
             del self._deadline_refs[piece]
+
+    def _on_error(self, message: str) -> None:
+        """libtorrent stopped the torrent. Resume it shortly, unless that keeps failing."""
+        self.error = message
+        if self._recovery is not None or self._gave_up:  # the same burst, or already given up
+            log.debug("Engine error for %s: %s", self.info_hash, message)
+            return
+        now = self._loop.time()
+        self._recoveries = [t for t in self._recoveries if now - t < ERROR_RECOVERY_WINDOW]
+        if len(self._recoveries) >= ERROR_RECOVERY_MAX:
+            self._gave_up = True
+            log.error(
+                "Engine error for %s: %s (keeps failing: the torrent stays stopped)", self.info_hash, message
+            )
+            return
+        self._recoveries.append(now)
+        log.warning(
+            "Engine error for %s: %s — resuming in %ss (%d/%d)",
+            self.info_hash, message, ERROR_RECOVERY_DELAY, len(self._recoveries), ERROR_RECOVERY_MAX,
+        )  # fmt: skip
+        self._recovery = self._loop.call_later(ERROR_RECOVERY_DELAY, self._recover)
+
+    def _recover(self) -> None:
+        self._recovery = None
+        if self.destroyed or not self.handle.is_valid():
+            return
+        self.handle.clear_error()  # also restarts the torrent
+        self.error = None
 
     def _on_read(self, a: Any) -> None:
         fut = self._waiters.read.pop(a.piece, None)
@@ -271,7 +312,9 @@ class Engine:
         if cached is not None:
             self._piece_cache.move_to_end(piece)
             return cached
-        for _attempt in range(5):
+        give_up = self._loop.time() + READ_RETRY_SECONDS
+        delay = 0.1
+        while True:
             await self.wait_piece(piece)
             fut = self._waiters.read.get(piece)
             if fut is None:
@@ -280,13 +323,17 @@ class Engine:
                 self.handle.read_piece(piece)
             try:
                 data = await asyncio.shield(fut)
-            except EngineError:
-                # e.g. piece was evicted / failed hash after finishing; wait for it again
-                await asyncio.sleep(0.2)
+            except EngineError as e:
+                # the part file is being moved out, the torrent is paused by a file error (resumed by
+                # _on_error), or the piece failed its hash after finishing: wait for it again
+                if self.destroyed or self._loop.time() + delay > give_up:
+                    raise EngineError(f"cannot read piece {piece}: {e}") from e
+                log.debug("%s: %s, retrying in %.1fs", self.info_hash, e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 1.0)
                 continue
             self._cache_put(piece, data)
             return data
-        raise EngineError(f"cannot read piece {piece}")
 
     def _cache_put(self, piece: int, data: bytes) -> None:
         if piece in self._piece_cache:
@@ -323,8 +370,9 @@ class Engine:
                 self._deadline_refs[p] = n - 1
 
     def ensure_file_wanted(self, file_idx: int) -> None:
-        """Like upstream stream-open: download the whole opened file in the background."""
-        if self.handle.file_priority(file_idx) == 0:
+        """Like upstream stream-open: download the whole opened file in the background (priority 4; the next
+        episode is fetched at 1 and raised when it is opened)."""
+        if self.handle.file_priority(file_idx) < 4:
             self.handle.file_priority(file_idx, 4)
         if file_idx in self.opened_files:
             self.opened_files.remove(file_idx)
@@ -356,7 +404,7 @@ class Engine:
         self.logged_opened.clear()
 
     def remaining_bytes(self) -> int:
-        """Bytes of the opened files not downloaded yet (what `completing` still has to fetch)."""
+        """Bytes of the opened files not downloaded yet: while > 0 the stream needs the line."""
         if not self.opened_files or self._files is None or not self.handle.is_valid():
             return 0
         progress = self.handle.file_progress()

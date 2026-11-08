@@ -11,7 +11,6 @@ class Kind(StrEnum):
     SUBTITLE = "subtitle"
     AUDIO = "audio"  # external audio track: .mka or a raw stream (.ac3, .dts, .flac, …)
     FONT = "font"
-    ARCHIVE = "archive"
     OTHER = "other"
 
 
@@ -102,12 +101,11 @@ class SubtitleTrack:
 
 @dataclass(frozen=True)
 class FontSource:
-    """Where a font can be found: a loose file, or an archive (all fonts inside it)."""
+    """A font file in the torrent."""
 
-    id: str  # "12" for a file, "13" for an archive (members get "13/<member>")
+    id: str  # the file index as a string
     file_idx: int
     path: str
-    is_archive: bool
     size: int
 
 

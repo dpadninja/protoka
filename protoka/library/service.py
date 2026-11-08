@@ -1,4 +1,4 @@
-"""LibraryService: keeps every cached torrent seeding, runs background work, evicts when full.
+"""LibraryService: keeps every cached torrent seeding, fetches the next episode, evicts when full.
 
 One tick (every 10 s, and right away when something happens — a stream opens or closes, a torrent is
 added, settings change):
@@ -8,13 +8,13 @@ added, settings change):
                                           →  save library.json
 
 Applying a decision is idempotent: a handle is only touched when its target settings change.
-    streaming    not auto-managed, downloads, all connections, upload not limited
-    completing   not auto-managed, downloads (no deadlines → rarest first), BG_MAX_CONNECTIONS
-    prefetching  same, with the next episode's head/tail pieces at top priority
-    waiting      not auto-managed, upload_mode (uploads only)
-    seeding      auto-managed + upload_mode: libtorrent's queue picks the active seeds (seed_rank)
+    streaming    not auto-managed, downloads, all connections, upload not limited; with `prefetch` the next
+                 episode's files (video, subtitles, audio, font sources) get file priority 1
+    seeding      auto-managed + upload_mode: uploads what is here, never downloads; libtorrent's queue picks
+                 the active seeds (seed_rank); BG_MAX_CONNECTIONS
     done         paused
-While something is being watched, the other torrents share STREAM_BG_UPLOAD_LIMIT.
+While something is being watched, the other torrents share STREAM_BG_UPLOAD_LIMIT. Once the next episode is
+downloaded, `on_prefetched` (set by the HTTP app) repacks its raw external audio to disk ahead of time.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import asyncio
 import logging
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,7 +34,7 @@ from protoka import logfmt
 from protoka.library import eviction, next_episode, policy
 from protoka.library.model import Decision, Limits, State, TorrentView
 from protoka.library.store import LibraryStore
-from protoka.subs import matching, names
+from protoka.subs import names
 from protoka.subs.model import Kind
 
 if TYPE_CHECKING:
@@ -55,9 +56,7 @@ _NO = Decision("", State.SEEDING)
 class Prefetch:
     video_idx: int  # the next episode
     name: str
-    pieces: tuple[int, ...]  # head/tail of the video and of its sidecar audio
-    whole_files: tuple[int, ...]  # small sidecars (subtitles), fetched whole
-    audio_files: int = 0  # sidecar .mka whose head/tail is included
+    files: tuple[int, ...]  # the video and its sidecars (next_episode.episode_files), downloaded whole
 
 
 def _dir_size(path: Path) -> int:
@@ -85,21 +84,22 @@ class LibraryService:
         self._sizes: dict[str, int] = {}
         self._sizes_at = 0.0
         self._cache_logged_at: float | None = None
+        self._short_logged = 0  # last reported shortfall over CACHE_SIZE (0 = fits): logged on change only
         self._wakeup = asyncio.Event()
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._startup_task: asyncio.Task | None = None
         self._global_upload: int | None = None
+        self._line_free, self._line_why = True, ""  # policy.line_free() of the last tick
+        # the next episode of `ih` (video index) is downloaded: the HTTP app prepares it (audio repack)
+        self.on_prefetched: Callable[[Engine, int], None] | None = None
         # what was last logged, so every event is written once, when it changes
-        self._bg_allowed: bool | None = None  # None: no background work, the gate is not worth a line
-        self._bg_why = ""
         self._prefetch_log: dict[str, tuple[str, float]] = {}  # ih -> (phase, since) phase: active|waiting
 
     # -- configuration ----------------------------------------------------------------------------
     def limits(self) -> Limits:
         s = self.session.settings
         return Limits(
-            bg_downloads=int(s["bgDownloads"]),
             seed_ratio=float(s["seedRatioLimit"] or 0),
             seed_time=float(s["seedTimeLimit"] or 0),
             stream_grace=float(s["streamGrace"]),
@@ -154,7 +154,7 @@ class LibraryService:
             views = [self._view(e) for e in engines]
             decisions = policy.decide(views, self.limits(), now)
             self.decisions = {d.ih: d for d in decisions}
-            self._log_background_gate(views, decisions, now)
+            self._line_free, self._line_why = policy.line_free(views, self.limits(), now)
             streaming = any(d.state is State.STREAMING for d in decisions)
             bg_active = [d for d in decisions if d.state not in (State.STREAMING, State.DONE)]
             share = self._background_upload_share(streaming, len(bg_active))
@@ -184,6 +184,7 @@ class LibraryService:
             ih=e.info_hash,
             name=getattr(e, "name", None) or item.get("name") or e.info_hash,
             open_streams=e.open_streams,
+            internal_reads=e.internal_reads,
             last_activity=e.last_activity,
             remaining_bytes=e.remaining_bytes(),
             prefetch_pending=pending,
@@ -248,22 +249,15 @@ class LibraryService:
             h.pause()
         elif state is State.SEEDING:
             h.set_flags(_BG_FLAGS)  # libtorrent's queue decides when it actually runs
-        else:
-            h.unset_flags(lt.torrent_flags.auto_managed)
-            if state is State.WAITING:
-                h.set_flags(lt.torrent_flags.upload_mode)
-            else:  # streaming, completing, prefetching: may download
-                h.unset_flags(lt.torrent_flags.upload_mode)
+        else:  # streaming: downloads
+            h.unset_flags(lt.torrent_flags.auto_managed | lt.torrent_flags.upload_mode)
             h.resume()
         if d.prefetch:
             target = self.prefetch.get(e.info_hash)
             if target is not None:
-                for p in target.pieces:
-                    if not h.have_piece(p):
-                        h.piece_priority(p, 7)
-                for fi in target.whole_files:
+                for fi in target.files:  # whole files: the data goes to the real files, not the part file
                     if h.file_priority(fi) == 0:
-                        h.file_priority(fi, 4)
+                        h.file_priority(fi, 1)  # below the episode being watched (4)
         e.applied = key
 
     # -- prefetch ---------------------------------------------------------------------------------
@@ -281,27 +275,23 @@ class LibraryService:
         nxt = next_episode.next_video(files, current)
         target = None
         if nxt is not None:
-            plen = e.piece_length
-            head, tail = int(s["prefetchHead"]), int(s["prefetchTail"])
-            info = e.files[nxt.index]
-            pieces = set(next_episode.head_tail_pieces(info["offset"], info["length"], plen, head, tail))
-            whole: list[int] = []
-            for m in matching.assign(files, Kind.SUBTITLE).by_video.get(nxt.index, []):
-                whole.append(m.sub.index)
-            n_audio = 0
-            for m in matching.assign(files, Kind.AUDIO).by_video.get(nxt.index, []):
-                if m.sub.ext in names.MKA_EXTS:  # raw streams need the whole file: repacked on open instead
-                    a = e.files[m.sub.index]
-                    pieces.update(next_episode.head_tail_pieces(a["offset"], a["length"], plen, head, tail))
-                    n_audio += 1
-            target = Prefetch(nxt.index, nxt.path, tuple(sorted(pieces)), tuple(whole), n_audio)
-            extras = [f"{len(whole)} subtitle(s)"] if whole else []
-            extras += [f"{n_audio} audio track(s) head/tail"] if n_audio else []
+            wanted = next_episode.episode_files(files, nxt.index)
+            target = Prefetch(nxt.index, nxt.path, tuple(wanted))
+            kinds = [files[i].kind for i in wanted[1:]]
+            parts = [
+                f"{n} {what}"
+                for n, what in (
+                    (kinds.count(Kind.SUBTITLE), "subtitle(s)"),
+                    (kinds.count(Kind.AUDIO), "audio track(s)"),
+                    (len(kinds) - kinds.count(Kind.SUBTITLE) - kinds.count(Kind.AUDIO), "font source(s)"),
+                )
+                if n
+            ]
+            total = sum(e.files[i]["length"] for i in wanted)
+            extras = "".join(f" + {p}" for p in parts)
             log.info(
-                '%s prefetch: next episode is "%s" — head %s + tail %s%s (%d pieces, ~%s)',
-                logfmt.tag(e, current), nxt.stem + nxt.ext, logfmt.size(head), logfmt.size(tail),
-                f", {', '.join(extras)}" if extras else "", len(target.pieces),
-                logfmt.size(len(target.pieces) * plen),
+                '%s prefetch: next episode is "%s" — video%s, %s',
+                logfmt.tag(e, current), nxt.stem + nxt.ext, extras, logfmt.size(total),
             )  # fmt: skip
         elif sum(f.kind is Kind.VIDEO for f in files) > 1:  # a single movie: nothing to say
             log.info('%s prefetch: no next episode after "%s"', logfmt.tag(e, current), files[current].stem)
@@ -310,26 +300,6 @@ class LibraryService:
         return target
 
     # -- event log ----------------------------------------------------------------------------------
-    def _log_background_gate(self, views: list[TorrentView], decisions: list[Decision], now: float) -> None:
-        """One line when the gate flips — only while some background work actually depends on it."""
-        allowed, self._bg_why = policy.background_allowed(views, self.limits(), now)
-        background = {State.COMPLETING, State.PREFETCHING, State.WAITING}
-        engines = self.session.engines
-        prefetching = any(
-            t is not None and ih in engines and self._prefetch_pending(engines[ih], t)
-            for ih, t in self.prefetch.items()
-        )
-        affected = prefetching or any(d.state in background for d in decisions)
-        if not affected:
-            self._bg_allowed = None
-            return
-        if allowed != self._bg_allowed:
-            if allowed:
-                log.info("library: background downloads allowed (%s)", self._bg_why)
-            else:
-                log.info("library: background downloads paused — %s", self._bg_why)
-        self._bg_allowed = allowed
-
     def _log_prefetch(self, e: Engine, d: Decision, now: float) -> None:
         """prefetch: started / waiting — why / done in Ns — each once, when the phase changes."""
         target = self.prefetch.get(e.info_hash)
@@ -343,12 +313,14 @@ class LibraryService:
             if phase:
                 log.info("%s prefetch: done in %s", tag, logfmt.secs(now - since))
                 self._prefetch_log.pop(e.info_hash, None)
+                if self.on_prefetched is not None:
+                    self.on_prefetched(e, target.video_idx)
             return
         if d.prefetch and phase != "active":
             log.info("%s prefetch: started", tag)
             self._prefetch_log[e.info_hash] = ("active", since if phase else now)
         elif not d.prefetch and phase != "waiting":
-            why = self._bg_why if self._bg_allowed is False else "no free background slot (BG_DOWNLOADS)"
+            why = self._line_why if not self._line_free else f"{logfmt.tag(e)} is not being watched"
             log.info("%s prefetch: waiting — %s", tag, why)
             self._prefetch_log[e.info_hash] = ("waiting", since if phase else now)
 
@@ -356,20 +328,19 @@ class LibraryService:
         h = e.handle
         if not h.is_valid():
             return False
-        if any(not h.have_piece(p) for p in target.pieces):
-            return True
-        progress = h.file_progress()
-        return any(progress[fi] < e.files[fi]["length"] for fi in target.whole_files)  # type: ignore[index]
+        return self._prefetch_remaining(e, target) > 0
+
+    def _prefetch_remaining(self, e: Engine, target: Prefetch) -> int:
+        progress = e.handle.file_progress()
+        return sum(max(0, e.files[fi]["length"] - progress[fi]) for fi in target.files)  # type: ignore[index]
 
     # -- eviction ---------------------------------------------------------------------------------
     async def _evict(self, views: list[TorrentView], states: dict[str, State]) -> None:
         s = self.session.settings
         cache_dir = s.cache_dir()
-        reserve = sum(
-            v.remaining_bytes for v in views if states.get(v.ih) in (State.STREAMING, State.COMPLETING)
-        )
+        reserve = sum(v.remaining_bytes for v in views if states.get(v.ih) is State.STREAMING)
         reserve += sum(
-            len(p.pieces) * self.session.engines[ih].piece_length
+            self._prefetch_remaining(self.session.engines[ih], p)
             for ih, p in self.prefetch.items()
             if p is not None and self.decisions.get(ih, _NO).prefetch and ih in self.session.engines
         )
@@ -381,6 +352,8 @@ class LibraryService:
             reserve=reserve,
             free_disk=free,
             min_free=int(s["minFreeDisk"]),
+            now=time.time(),
+            keep_recent=float(s["cacheKeepRecent"]),
         )
         self.last_eviction = plan
         self._log_cache_size(plan, states, free)
@@ -393,10 +366,21 @@ class LibraryService:
             self.prefetch.pop(ih, None)
             self._prefetch_for.pop(ih, None)
             self.evicted = ([{"infoHash": ih, "reason": reason, "at": time.time()}] + self.evicted)[:20]
-        if plan.still_short > 0:
+        self._log_shortfall(plan)
+
+    def _log_shortfall(self, plan: eviction.Plan) -> None:
+        """Really over CACHE_SIZE on disk with nothing (more) allowed to go: once when it starts, once when it
+        is over. Not the forecast with the reserve: that one moves every tick."""
+        short = plan.over_used
+        if short > 0 and not self._short_logged:
             log.warning(
-                "cache: %d bytes over budget even after evicting everything allowed", plan.still_short
-            )
+                "cache: %s over CACHE_SIZE; kept, as only what is being or was recently watched "
+                "(CACHE_KEEP_RECENT) remains",
+                logfmt.size(short),
+            )  # fmt: skip
+        elif short == 0 and self._short_logged:
+            log.info("cache: within CACHE_SIZE again")
+        self._short_logged = short
 
     def _log_cache_size(self, plan: eviction.Plan, states: dict[str, State], free: int) -> None:
         """Periodic summary of the cache: how full it is, what it holds, what is reserved, disk headroom."""
@@ -432,7 +416,7 @@ class LibraryService:
         limits = self.limits()
         engines = [e for e in self.session.engines.values() if not e.destroyed]
         views = {v.ih: v for v in (self._view(e) for e in engines)}
-        allowed, why = policy.background_allowed(list(views.values()), limits, time.time())
+        free, why = policy.line_free(list(views.values()), limits, time.time())
         torrents: list[dict[str, Any]] = []
         for e in engines:
             v = views[e.info_hash]
@@ -471,8 +455,10 @@ class LibraryService:
                 "reserve": plan.reserve if plan else 0,
                 "free": shutil.disk_usage(s.cache_dir()).free,
                 "minFree": int(s["minFreeDisk"]),
+                "keepRecent": s["cacheKeepRecent"],
+                "overBy": plan.over_used if plan else 0,
             },
-            "background": {"allowed": allowed, "why": why, "downloads": limits.bg_downloads},
+            "nextEpisode": {"allowed": free, "why": why},
             "limits": {
                 "seedUploadLimit": s["seedUploadLimit"],
                 "streamBgUploadLimit": s["streamBgUploadLimit"],

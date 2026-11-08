@@ -1,8 +1,8 @@
 # Release: push a version tag (git tag v1.2.3 && git push origin v1.2.3) →
 #   1. lint, types, the full test suite (with ffmpeg);
 #   2. scripts/publish.sh: security scans (dependencies, Dockerfile, then the image), image build with SBOM and
-#      provenance attestations, smoke test as UID 568, push <user>/protoka:1.2.3 and :latest — the same script
-#      as a local release, so CI and manual publishing cannot drift apart. A fixable HIGH/CRITICAL finding
+#      provenance attestations, smoke tests (UID 10001 and an arbitrary UID), push <user>/protoka:1.2.3 and
+#      :latest — the same script as a local release, so CI and manual publishing cannot drift apart. A fixable HIGH/CRITICAL finding
 #      stops it before anything is pushed;
 #   3. keyless cosign signature of the pushed digest (GitHub OIDC identity);
 #   4. a GitHub release with generated notes, the wheel and the sdist.

@@ -4,7 +4,7 @@
                                           (match.reasons), audio repack status, mux status
     GET /:ih/:idx/subtitles.json          the same (older name)
     GET /:ih/:idx/subtitles/:sid.:fmt     one subtitle as UTF-8 (original format, or converted to srt/vtt)
-    GET /:ih/fonts/:font                  a font file (`12` or `13/<member of an archive>`)
+    GET /:ih/fonts/:font                  a font file, by its file index (`12`)
 
 Players normally do not need these: the stream itself carries the subtitles (see `mux`).
 """
@@ -101,7 +101,6 @@ async def subtitles_json(request: web.Request) -> web.Response:
                 {
                     "id": src.id,
                     "path": src.path,
-                    "archive": src.is_archive,
                     "size": src.size,
                     "url": f"/{ih}/fonts/{src.id}",
                 }

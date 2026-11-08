@@ -19,7 +19,8 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
 - Lint/format/types: `uv run ruff check .`, `uv run ruff format .`, `uv run mypy protoka`
 - Absolute imports only (`from protoka.x import y`; ruff TID252 enforces it)
 - Docker image (one container, env-only config, one `/data` mount):
-  publish with `./scripts/publish.sh <user>/protoka [--dry-run] [--force]` (tests, build, smoke test as 568, push).
+  build only (no tests/scans/push) with `./scripts/build.sh [image]` (default `protoka:dev`, version from hatch-vcs);
+  publish with `./scripts/publish.sh <user>/protoka [--dry-run] [--force]` (tests, build, smoke tests as the default UID 10001 and an arbitrary UID, push).
   The version is the **git tag** (`git tag v1.2.3`; hatch-vcs, `dynamic = ["version"]`): publishing needs a tagged,
   clean HEAD, `--dry-run` also works untagged (1.2.4.devN+g<sha>). The image build has no `.git` and gets it as
   `--build-arg VERSION` → `SETUPTOOLS_SCM_PRETEND_VERSION`; `protoka.__version__` reads package metadata; an already
@@ -28,6 +29,8 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
   HIGH/CRITICAL; exceptions only in `.trivyignore.yaml` with `statement` + `expired_at`). `publish.sh` runs both
   before pushing; CI (`.github/workflows/ci.yml`) runs them on every push/PR. Ruff includes bandit (`S`): fix, or
   `# noqa: S…` with a reason. Base images are pinned by digest; actions by commit SHA (zizmor checks the workflows).
+  The image runs as UID 10001; `/data` is `10001:0` mode 0770 (arbitrary UIDs run with GID 0); bind mounts need
+  `--user <owner>` (TrueNAS: 568:568). Never make it world-writable.
   Container config is env-only: `BT_PORT`, `CACHE_ROOT`, `CACHE_SIZE`, `PREFERRED_AUDIO_LANG`, `MUX_AUDIO_WAIT`,
   `FONT_FALLBACK`, `FALLBACK_FONTS_DIR`,
   `PORT`, `APP_PATH`, `LOG_LEVEL`
@@ -70,9 +73,11 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
   `VirtualFile(layout, read)` reads sources by key: `video`, `file:<idx>`, `local:<path>`.
 - **Seeding library** (`library/`, `analysis/15-seeding.md`): torrents are never unloaded on inactivity; the
   `LibraryService` tick snapshots every torrent (`TorrentView`), `policy.decide` gives states with reasons
-  (streaming / completing / prefetching / waiting / seeding = libtorrent auto-managed queue / done), applies them
+  (streaming = downloads, next episode once the watched one is on disk / seeding = upload only,
+  libtorrent auto-managed queue / done), applies them
   idempotently (`Engine.applied`), then `eviction.choose_victims` (never streaming; done first, then LRU by
-  watching). "Background allowed" = no streaming torrent still downloads. `/remove` ends watching only;
+  watching). Nothing downloads once nobody watches (`analysis/21-watch-only.md`); the next episode waits
+  while any watched episode still downloads. Our own ffmpeg (UA `Lavf`) is not a viewer. `/remove` ends watching only;
   `?purge=1` deletes. Torrents in the cache are restored on start (paused, released in batches).
 - `stats.py` must stay field-compatible with upstream `getStatistics`: stremio-core parses it with a **strict serde
   schema** (mirrored in `tests/stremio_contract.py`); one missing/mistyped required field (e.g. a null
@@ -89,7 +94,7 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
 - Mux builds run in a service-owned task (`MuxService._run_build`) awaited via `asyncio.shield`: a request that is
   cancelled (client disconnect) must not leave the shared cache entry unfinished.
 - `ffmpeg -err_detect crccheck` does not verify cluster CRC-32s: test CRCs with an independent implementation.
-- CPU-heavy pure steps (charset detection, fontTools, archive extraction) run in `asyncio.to_thread`.
+- CPU-heavy pure steps (charset detection, fontTools) run in `asyncio.to_thread`.
 - The libtorrent binding cannot read `session_params.dht_state.nodes` (TypeError); count nodes from the bencoded
   state with `session.count_saved_nodes`.
 - fontTools-generated fonts embed a timestamp: compare fonts by family name in tests, not by bytes.

@@ -311,8 +311,11 @@ class TorrentSession:
         sources: Iterable[object] | None = None,
         torrent: bytes | None = None,
         options: dict[str, Any] | None = None,
+        touch: bool = True,
     ) -> Engine:
-        """Get or create the engine for `info_hash` (lowercase hex). Does not wait for metadata."""
+        """Get or create the engine for `info_hash` (lowercase hex). Does not wait for metadata.
+
+        `touch=False`: an internal request (our ffmpeg) — it does not count as someone watching."""
         ih = info_hash.lower()
         lock = self._locks.setdefault(ih, asyncio.Lock())
         async with lock:
@@ -323,7 +326,8 @@ class TorrentSession:
             if e is not None and not e.destroyed:
                 if sources:
                     self._add_trackers(e, merge_trackers(sources, include_defaults=False))
-                self.touch(e)
+                if touch:
+                    self.touch(e)
                 return e
             e = await self._add(ih, sources, torrent, options or {})
             self.engines[ih] = e

@@ -31,7 +31,6 @@ RAW_AUDIO_EXTS = frozenset(
 )
 AUDIO_EXTS = MKA_EXTS | RAW_AUDIO_EXTS
 FONT_EXTS = frozenset(".ttf .otf .ttc .otc".split())
-ARCHIVE_EXTS = frozenset(".zip .7z .rar".split())
 
 # Words that are never part of a title: release noise.
 _NOISE_WORDS = frozenset(
@@ -101,7 +100,6 @@ GENERIC_SUBTITLE_WORDS = frozenset(
 # Words that distinguish subtitle variants and belong in the label ("Signs", "Надписи", "Full").
 LABEL_WORDS = frozenset("signs надписи full forced sdh cc songs karaoke commentary комментарии".split())
 SUBTITLE_WORDS = GENERIC_SUBTITLE_WORDS | LABEL_WORDS
-FONT_FOLDER_WORDS = frozenset("fonts font шрифты шрифт".split())
 
 _FRACTION_RE = re.compile(r"(?<!\d)(\d{1,4})\.(\d)(?![\d.]|\d*p)")
 # "2_English.srt" inside "Subs/<video>/": the number is a track index, not an episode
@@ -122,8 +120,6 @@ def classify(ext: str) -> Kind:
         return Kind.AUDIO
     if ext in FONT_EXTS:
         return Kind.FONT
-    if ext in ARCHIVE_EXTS:
-        return Kind.ARCHIVE
     return Kind.OTHER
 
 

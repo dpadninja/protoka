@@ -1,4 +1,4 @@
-"""End-to-end seeding: cached torrents keep seeding, background work yields to watching, eviction, prefetch."""
+"""End-to-end seeding: cached torrents keep seeding, only what is watched downloads, eviction, next episode."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from pathlib import Path
 
 import libtorrent as lt
 
-from protoka.stream import read_file
 from tests.conftest import OFFLINE, Seed, connect_to_seed, file_index, logged
 from tests.stremio_contract import validate
 
@@ -77,59 +76,44 @@ async def test_watched_file_is_seeded_to_others_after_playback(client, torrent_s
         other.pause()
 
 
-async def test_background_completion_yields_to_what_is_being_watched(
+async def test_an_abandoned_file_is_not_completed_but_seeded_and_resumes_when_watched_again(
     client, torrent_session, make_seed, caplog
 ):
     caplog.set_level(logging.INFO, logger="protoka")
     a = make_seed({"A.mkv": os.urandom(900_000)}, top="A")
-    b = make_seed({"B.mkv": os.urandom(900_000)}, top="B")
-    # A: opened, the player left after the first bytes; its source disappears so A stays incomplete.
-    # Locally 900 KB would arrive in a blink (the opened file is fully wanted) and the pause below would
-    # come too late, so A's seeder is throttled: the first piece takes ~1.5 s, the whole file ~45 s.
-    a.session.get_torrents()[0].set_upload_limit(20_000)  # per torrent: applies to loopback peers too
+    # throttled seeder: the whole file would take ~45 s, so "left after the first bytes" is real
+    a.session.get_torrents()[0].set_upload_limit(20_000)
     async with asyncio.timeout(T):
         await client.post("/create", json={"blob": a.torrent.hex()})
         connect_to_seed(torrent_session, a.info_hash, a)
         await (await client.get(f"/{a.info_hash}/0", headers={"Range": "bytes=0-1000"})).read()
-    a.session.pause()
     ea = torrent_session.get(a.info_hash)
     await stop_watching(client, torrent_session, a.info_hash)
-    assert ea.remaining_bytes() > 0
+    assert ea.state == "seeding" and ea.handle.flags() & lt.torrent_flags.upload_mode
+    await asyncio.sleep(1)  # blocks requested before the switch may still arrive
+    left = ea.remaining_bytes()
+    assert left > 0
+    await asyncio.sleep(2)  # the seeder is still there, but we do not fetch
+    assert ea.remaining_bytes() == left
 
-    # B is being watched and still downloading (its seeder is not connected yet) → A waits, upload only
-    await client.post("/create", json={"blob": b.torrent.hex()})
-    eb = torrent_session.get(b.info_hash)
-    torrent_session.stream_opened(eb)
-    eb.ensure_file_wanted(0)
-    decisions = {d.ih: d for d in await torrent_session.library.tick()}
-    assert decisions[a.info_hash].state.value == "waiting"
-    assert "being watched and still downloading" in decisions[a.info_hash].reasons[0]
-    assert ea.handle.flags() & lt.torrent_flags.upload_mode
-    assert ea.handle.max_connections() == torrent_session.settings["bgMaxConnections"]
-
-    # B's file is complete → A may finish in the background, even with B's player still open
-    connect_to_seed(torrent_session, b.info_hash, b)
-    await asyncio.wait_for(read_file(eb, 0, 10**7), T)
-    decisions = {d.ih: d for d in await torrent_session.library.tick()}
-    assert decisions[a.info_hash].state.value == "completing"
-    assert not ea.handle.flags() & lt.torrent_flags.upload_mode
-    await torrent_session.library.tick()  # nothing changed: no new lines
-    torrent_session.stream_closed(eb)
-
-    # every transition and every flip of the background gate is logged exactly once
-    assert logged(caplog, "library")[-4:] == [
-        "library: background downloads paused — 'B' is being watched and still downloading",
-        "[A] library: completing → waiting (finishing opened files paused: 'B' is being watched and still downloading)",
-        "library: background downloads allowed (nothing being watched needs the line)",
-        "[A] library: waiting → completing (finishing opened files; nothing being watched needs the line)",
-    ]
+    torrent_session.stream_opened(ea)  # the player is back
+    await torrent_session.library.tick()
+    assert ea.state == "streaming" and not ea.handle.flags() & lt.torrent_flags.upload_mode
+    async with asyncio.timeout(T):
+        while ea.remaining_bytes() == left:
+            await asyncio.sleep(0.1)
+    torrent_session.stream_closed(ea)
+    a.session.pause()
+    assert any(
+        m.startswith("[A] library: streaming → seeding (not watched: seeding what is here, not fetching ")
+        for m in logged(caplog, "library")
+    )
 
 
-async def test_next_episode_is_prefetched_while_the_player_is_open(
+async def test_next_episode_downloads_whole_once_the_watched_one_is_on_disk(
     client, torrent_session, make_seed, caplog
 ):
     caplog.set_level(logging.INFO, logger="protoka")
-    torrent_session.settings.save({"prefetchHead": 64 * 1024, "prefetchTail": 32 * 1024})
     seed = make_seed(
         {
             "[G] Title - 01.mkv": os.urandom(500_000),
@@ -139,6 +123,8 @@ async def test_next_episode_is_prefetched_while_the_player_is_open(
         },
         top="T",
     )
+    prepared: list[int] = []
+    torrent_session.library.on_prefetched = lambda e, idx: prepared.append(idx)
     async with asyncio.timeout(T):
         resp = await client.post("/create", json={"blob": seed.torrent.hex()})
         files = (await resp.json())["files"]
@@ -152,27 +138,65 @@ async def test_next_episode_is_prefetched_while_the_player_is_open(
     d = decisions[seed.info_hash]
     assert d.state.value == "streaming" and d.prefetch
     target = torrent_session.library.prefetch[seed.info_hash]
-    assert target.video_idx == ep2 and target.whole_files == (file_index(files, "[G] Title - 02.srt"),)
+    srt = file_index(files, "[G] Title - 02.srt")
+    assert target.video_idx == ep2 and target.files == (ep2, srt)
+    assert engine.handle.file_priority(ep2) == 1  # below the episode being watched
 
     deadline = time.monotonic() + T
-    while any(not engine.handle.have_piece(p) for p in target.pieces) and time.monotonic() < deadline:
+    while time.monotonic() < deadline:
+        progress = engine.handle.file_progress()
+        if progress[ep2] == files[ep2]["length"] and progress[srt] == files[srt]["length"]:
+            break
         await asyncio.sleep(0.1)
     progress = engine.handle.file_progress()
-    plen = engine.piece_length
-    assert all(engine.handle.have_piece(p) for p in target.pieces)  # head and tail of episode 2
-    assert 0 < progress[ep2] < files[ep2]["length"] - plen  # …but not the whole episode
-    assert progress[file_index(files, "[G] Title - 03.mkv")] == 0  # episode 3 untouched
+    assert (
+        progress[ep2] == files[ep2]["length"] and progress[srt] == files[srt]["length"]
+    )  # whole, in real files
+    assert progress[file_index(files, "[G] Title - 03.mkv")] == 0  # one episode ahead only
     await torrent_session.library.tick()
     await torrent_session.library.tick()
     torrent_session.stream_closed(engine)
+    assert prepared == [ep2]  # its audio is prepared ahead (none here)
 
     prefetch = logged(caplog, "prefetch")
     assert prefetch[0].startswith(
-        '[T · [G] Title - 01.mkv] prefetch: next episode is "[G] Title - 02.mkv" — head 64.00 KB + tail 32.00 KB, '
-        "1 subtitle(s)"
+        '[T · [G] Title - 01.mkv] prefetch: next episode is "[G] Title - 02.mkv" — video + 1 subtitle(s), '
     )
     assert prefetch[-1].startswith("[T · [G] Title - 02.mkv] prefetch: done in ")
     assert sum("prefetch: started" in m for m in prefetch) == 1
+
+
+async def test_our_own_ffmpeg_reading_a_file_is_not_someone_watching(client, torrent_session, seed):
+    await watch(client, torrent_session, seed, "Show.S01E01.mkv")
+    e = torrent_session.get(seed.info_hash)
+    await stop_watching(client, torrent_session, seed.info_hash)
+    async with asyncio.timeout(T):
+        before = e.last_activity
+        resp = await client.get(f"/{seed.info_hash}/0?mux=0", headers={"User-Agent": "Lavf/61.7.100"})
+        assert resp.status == 200 and await resp.read()
+    assert e.last_activity == before and e.open_streams == 0
+    await torrent_session.library.tick()
+    assert e.state == "seeding"
+
+
+async def test_a_repack_started_while_watching_finishes_after_the_viewer_left(
+    client, torrent_session, make_seed
+):
+    """Our ffmpeg reads a file that is not downloaded yet; the viewer is gone. The torrent keeps fetching for it
+    (otherwise ffmpeg would hang and block the repack queue), without counting as someone watching."""
+    seed = make_seed({"A.mkv": os.urandom(300_000), "A.ac3": os.urandom(400_000)}, top="A")
+    async with asyncio.timeout(T):
+        await client.post("/create", json={"blob": seed.torrent.hex()})
+        e = torrent_session.get(seed.info_hash)
+        await stop_watching(client, torrent_session, seed.info_hash)
+        assert e.state == "seeding"
+        ac3 = file_index(e.files, "A.ac3")
+        resp = await client.get(f"/{seed.info_hash}/{ac3}?mux=0", headers={"User-Agent": "Lavf/61.7.100"})
+        connect_to_seed(torrent_session, seed.info_hash, seed)
+        assert await resp.read() == seed.content("A.ac3")
+    assert e.open_streams == 0
+    await torrent_session.library.tick()
+    assert e.state == "seeding" and e.internal_reads == 0
 
 
 async def test_cache_full_evicts_the_least_recently_watched(client, torrent_session, make_seed, caplog):
@@ -181,7 +205,7 @@ async def test_cache_full_evicts_the_least_recently_watched(client, torrent_sess
     new = make_seed({"New.mkv": os.urandom(700_000)}, top="New")
     await watch(client, torrent_session, old, "Old.mkv")
     await stop_watching(client, torrent_session, old.info_hash)
-    torrent_session.get(old.info_hash).last_watched = time.time() - 3600
+    torrent_session.get(old.info_hash).last_watched = time.time() - 2 * 86400  # beyond CACHE_KEEP_RECENT
     torrent_session.settings.save({"cacheSize": 1_000_000})  # room for one of them
     torrent_session.library._sizes_at = 0  # rescan disk usage now
 
@@ -202,6 +226,32 @@ async def test_cache_full_evicts_the_least_recently_watched(client, torrent_sess
     before = len(sizes)
     await torrent_session.library.tick()
     assert len([m for m in logged(caplog, "cache") if m.startswith("cache: ")]) == before
+
+
+async def test_cache_full_keeps_what_was_just_watched_and_says_so_once(
+    client, torrent_session, make_seed, caplog
+):
+    caplog.set_level(logging.INFO, logger="protoka")
+    old = make_seed({"Old.mkv": os.urandom(700_000)}, top="Old")
+    new = make_seed({"New.mkv": os.urandom(700_000)}, top="New")
+    await watch(client, torrent_session, old, "Old.mkv")
+    await stop_watching(client, torrent_session, old.info_hash)
+    torrent_session.settings.save({"cacheSize": 1_000_000})
+    await watch(client, torrent_session, new, "New.mkv")
+    for _ in range(3):
+        torrent_session.library._sizes_at = 0
+        await torrent_session.library.tick()
+    assert old.info_hash in torrent_session.engines  # watched a minute ago: over CACHE_SIZE, but kept
+    over = [m for m in logged(caplog, "cache") if "over CACHE_SIZE" in m]
+    assert len(over) == 1 and "kept" in over[0]
+    report = await (await client.get("/seeding.json")).json()
+    assert report["cache"]["overBy"] > 0 and report["cache"]["keepRecent"] == 86400
+
+    torrent_session.get(old.info_hash).last_watched = time.time() - 2 * 86400
+    torrent_session.library._sizes_at = 0
+    await torrent_session.library.tick()
+    assert old.info_hash not in torrent_session.engines
+    assert "cache: within CACHE_SIZE again" in logged(caplog, "cache")
 
 
 async def test_background_upload_is_shared_while_watching(client, torrent_session, make_seed):
@@ -257,7 +307,7 @@ async def test_seeding_report_and_stats_contract(client, torrent_session, make_s
     assert validate(stats) == []
     await torrent_session.library.tick()
     report = await (await client.get("/seeding.json")).json()
-    assert {"cache", "background", "limits", "torrents", "recentlyEvicted"} <= set(report)
+    assert {"cache", "nextEpisode", "limits", "torrents", "recentlyEvicted"} <= set(report)
     assert report["cache"]["budget"] == torrent_session.settings["cacheSize"]
     (t,) = report["torrents"]
     assert t["state"] == "streaming" and t["sizeOnDisk"] > 0

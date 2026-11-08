@@ -63,8 +63,11 @@ def _wait_alert(ses: lt.session, name: str, timeout: float = 10) -> None:
     raise AssertionError(f"seeder: no {name}")
 
 
-def start_seed(root: Path, top: str, files: dict[str, bytes]) -> Seed:
-    """Write `files` (relative paths under `root/top`) and seed them from a local libtorrent session."""
+def start_seed(root: Path, top: str, files: dict[str, bytes], *, pad_files: bool = True) -> Seed:
+    """Write `files` (relative paths under `root/top`) and seed them from a local libtorrent session.
+
+    `pad_files=False`: a v1-only torrent without pad files, so pieces straddle file boundaries (common in
+    real releases)."""
     for rel, data in files.items():
         path = root / top / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +76,8 @@ def start_seed(root: Path, top: str, files: dict[str, bytes]) -> Seed:
         warnings.simplefilter("ignore", DeprecationWarning)
         fs = lt.file_storage()
         lt.add_files(fs, str(root / top))
-        ct = lt.create_torrent(fs, PIECE_SIZE)
+        flags = 0 if pad_files else lt.create_torrent.v1_only
+        ct = lt.create_torrent(fs, PIECE_SIZE, flags=flags)
         lt.set_piece_hashes(ct, str(root))
         data = lt.bencode(ct.generate())
     ti = lt.torrent_info(data)
@@ -93,8 +97,8 @@ def start_seed(root: Path, top: str, files: dict[str, bytes]) -> Seed:
 def make_seed(tmp_path: Path):
     seeds: list[Seed] = []
 
-    def factory(files: dict[str, bytes], top: str = "Show") -> Seed:
-        s = start_seed(tmp_path / f"seed{len(seeds)}", top, files)
+    def factory(files: dict[str, bytes], top: str = "Show", *, pad_files: bool = True) -> Seed:
+        s = start_seed(tmp_path / f"seed{len(seeds)}", top, files, pad_files=pad_files)
         seeds.append(s)
         return s
 

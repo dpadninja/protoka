@@ -59,10 +59,35 @@ def version_banner() -> str:
     )
 
 
+def ensure_writable(path: Path) -> None:
+    """Create `path` and prove it is writable, or stop with the owner and a hint instead of a traceback.
+
+    In a container this is the usual first-run problem: a volume or a host directory owned by another UID.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-test"
+        probe.touch()
+        probe.unlink()
+    except OSError as e:
+        owner = ""
+        for p in (path, *path.parents):  # the nearest directory we can stat: a 0770 parent hides its children
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            owner = f", {p} belongs to {st.st_uid}:{st.st_gid} (mode {st.st_mode & 0o7777:o})"
+            break
+        raise SystemExit(
+            f"{path} is not writable for {os.getuid()}:{os.getgid()} ({e.strerror}){owner}. "
+            "Run as the owner of that directory (docker: --user UID:GID) or let this user write to it."
+        ) from e
+
+
 async def serve(args: argparse.Namespace) -> None:
     log.info("Starting %s", version_banner())
     app_path = args.app_path or default_app_path()
-    app_path.mkdir(parents=True, exist_ok=True)
+    ensure_writable(app_path)
     log.info("Using app path -> %s", app_path)
     settings = Settings(app_path)
     try:
@@ -77,7 +102,7 @@ async def serve(args: argparse.Namespace) -> None:
         "Effective config: http=%s:%s bt_port=%s app_path=%s cache=%s (limit %s) uid=%s "
         "mux=%s preferred_audio=%s audio_wait=%ss repacks=%s font_fallback=%s | "
         "seeding: upload=%s bg_upload_while_watching=%s max_active=%s ratio=%s time=%ss "
-        "bg_downloads=%s bg_conns=%s grace=%ss prefetch=%s min_free=%s",
+        "bg_conns=%s grace=%ss next_episode=%s min_free=%s keep_recent=%ss",
         args.host,
         args.port,
         settings["btListenPort"],
@@ -95,11 +120,11 @@ async def serve(args: argparse.Namespace) -> None:
         settings["seedMaxActive"] or "all",
         settings["seedRatioLimit"] or "none",
         settings["seedTimeLimit"] or "none",
-        settings["bgDownloads"],
         settings["bgMaxConnections"],
         settings["streamGrace"],
         settings["prefetchNext"],
         settings["minFreeDisk"],
+        settings["cacheKeepRecent"],
     )
     convert.set_concurrency(int(settings["muxRepackConcurrency"]))
     if settings["fontFallback"]:  # index the bundled fonts now, not on the first playback that needs them
@@ -137,6 +162,9 @@ def main() -> None:
     logging.basicConfig(
         level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
+        # fontTools.subset logs ~200 INFO lines per subset font; our "mux: ~ font …" line says what matters
+        logging.getLogger("fontTools").setLevel(logging.WARNING)
     asyncio.run(serve(args))
 
 
