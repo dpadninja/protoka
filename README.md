@@ -1,6 +1,6 @@
 <div align="center">
 
-# protoka
+# ≋ protoka
 
 **An alternative Stremio streaming server with extras**
 
