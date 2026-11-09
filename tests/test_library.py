@@ -115,6 +115,20 @@ def files(*paths):
         (["T/Title - 12.mkv"], 0, None),  # last episode
         (["M/Part One.mkv", "M/Part Two.mkv", "M/Other/x.mkv"], 0, 1),  # no numbers: next in the folder
         (["T/[G] Title - 01.mkv", "T/RUS Sound/[G] Title - 02.mka", "T/[G] Title - 02.mkv"], 0, 2),
+        # an episode title after the number is not the show (live log, 2026-11-09)
+        (
+            [
+                "P/The.One.About.Matthew.Perry.S01E01.Part.I.1080p.NF.WEB-DL.ENG.ITA.DDP5.1.H264-TBK.mkv",
+                "P/The.One.About.Matthew.Perry.S01E02.Part.II.1080p.NF.WEB-DL.ENG.ITA.DDP5.1.H264-TBK.mkv",
+                "P/The.One.About.Matthew.Perry.S01E03.Part.III.1080p.NF.WEB-DL.ENG.ITA.DDP5.1.H264-TBK.mkv",
+            ],
+            0,
+            1,
+        ),
+        (["S/Show.S01E04.The.Pilot.mkv", "S/Show.S01E05.Another.Title.mkv"], 0, 1),
+        (["T/Title - 05 - Arrival.mkv", "T/Title - 06 - Departure.mkv"], 0, 1),
+        (["S/Show.S01E01.Pilot.mkv", "S/Other.Show.S01E02.Pilot.mkv"], 0, None),  # another show
+        (["S/S01E01.Pilot.mkv", "S/S01E02.Pilot.mkv"], 0, 1),  # nothing before the number: same title
     ],
 )
 def test_next_video(paths, current, expected):
