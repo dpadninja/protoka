@@ -166,12 +166,7 @@ class LibraryService:
                     continue  # restored, not handed to libtorrent yet
                 self._apply(e, d, share, now)
                 self._log_prefetch(e, d, now)
-            if self.session.settings.caching_disabled:
-                for d in decisions:
-                    if d.state is not State.STREAMING:
-                        await self.session.purge(d.ih, reason="caching disabled")
-            else:
-                await self._evict(views, {d.ih: d.state for d in decisions})
+            await self._evict(views, {d.ih: d.state for d in decisions})
             self.store.save()
             return decisions
 

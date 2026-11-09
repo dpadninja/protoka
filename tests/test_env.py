@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from protoka.config import EnvError, Settings, env_overrides, parse_size
+from protoka.config import EnvError, Settings, env_overrides, parse_size, settings_options
 
 
 @pytest.mark.parametrize(
@@ -134,14 +134,42 @@ def test_seeding_env_errors(env, message):
         env_overrides(env)
 
 
-def test_old_default_cache_size_is_migrated(app_path):
+@pytest.mark.parametrize(
+    "saved",
+    [
+        {"cacheSize": 2 * 1024**3},  # upstream / v1 default
+        {"cacheSize": 50 * 1024**3, "settingsVersion": 2},  # v2 default
+    ],
+)
+def test_old_default_cache_size_is_migrated(app_path, saved):
     import json
 
-    (app_path / "server-settings.json").write_text(json.dumps({"cacheSize": 2147483648}))
+    (app_path / "server-settings.json").write_text(json.dumps(saved))
     s = Settings(app_path)
-    assert s["cacheSize"] == 50 * 1024**3 and s["settingsVersion"] == 2
-    s.save({"cacheSize": 2147483648})  # chosen explicitly after the migration: kept
-    assert Settings(app_path)["cacheSize"] == 2147483648
+    assert s["cacheSize"] == 128 * 1024**3 and s["settingsVersion"] == 3
+    s.save({"cacheSize": saved["cacheSize"]})  # chosen explicitly after the migration: kept
+    assert Settings(app_path)["cacheSize"] == saved["cacheSize"]
+
+
+def test_a_chosen_cache_size_is_not_migrated(app_path):
+    import json
+
+    (app_path / "server-settings.json").write_text(json.dumps({"cacheSize": 50 * 1024**3}))  # v1: a choice
+    assert Settings(app_path)["cacheSize"] == 50 * 1024**3
+
+
+@pytest.mark.parametrize("value", [0, -1, "x"])
+def test_there_is_no_no_caching_mode(app_path, value):
+    s = Settings(app_path)
+    s.save({"cacheSize": value})  # Stremio's old "no caching" or garbage → the default
+    (opt,) = (o for o in settings_options(s, []) if o["id"] == "cacheSize")
+    cache_choices = [c["val"] for c in opt["selections"]]
+    assert s["cacheSize"] == 128 * 1024**3 and 0 not in cache_choices
+
+
+def test_cache_size_zero_from_env_is_refused():
+    with pytest.raises(EnvError, match="no no-caching mode"):
+        env_overrides({"CACHE_SIZE": "0"})
 
 
 def test_version_is_logged_at_start(tmp_path):
