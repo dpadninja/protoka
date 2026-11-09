@@ -13,7 +13,6 @@ import contextlib
 import logging
 import os
 import shutil
-import tempfile
 import time
 from collections.abc import Awaitable, Iterable
 from pathlib import Path
@@ -151,12 +150,6 @@ class TorrentSession:
         params.settings = self.settings_pack()  # type: ignore[assignment]  # the binding takes dicts
         return lt.session(params)
 
-    def apply_settings(self) -> None:
-        """Re-apply settings after POST /settings."""
-        self.ses.apply_settings(self.settings_pack())  # type: ignore[arg-type]  # dicts are accepted
-        for e in self.engines.values():
-            self._apply_torrent_limits(e.handle)
-
     def _apply_torrent_limits(self, h: lt.torrent_handle) -> None:
         h.set_max_connections(self.settings["btMaxConnections"])
         # btDownloadSpeedSoft/HardLimit are kept only for UI compatibility: upstream paused the swarm
@@ -277,8 +270,7 @@ class TorrentSession:
         for t in self._tasks:
             t.cancel()
         await self.library.stop()
-        if not self.settings.caching_disabled:
-            await self.save_all_resume()
+        await self.save_all_resume()
         for e in list(self.engines.values()):
             e.fail_waiters()
         self.save_state()
@@ -297,12 +289,7 @@ class TorrentSession:
         return list(self.engines)
 
     def cache_path(self, info_hash: str) -> Path:
-        if self.settings.caching_disabled:
-            # upstream keeps no-cache torrents in memory; we use a scratch dir deleted on removal
-            base = Path(tempfile.gettempdir()) / "stremio-nocache"
-        else:
-            base = self.settings.cache_dir()
-        return base / info_hash
+        return self.settings.cache_dir() / info_hash
 
     async def create(
         self,
@@ -424,7 +411,7 @@ class TorrentSession:
     def on_metadata(self, e: Engine) -> None:
         """Persist metadata so a re-open after restart does not need peers to fetch it again."""
         ti = e.handle.torrent_file()
-        if ti is None or self.settings.caching_disabled:
+        if ti is None:
             return
         try:
             data = b"d4:info" + bytes(ti.info_section()) + b"e"
@@ -518,8 +505,6 @@ class TorrentSession:
         """Load every torrent found in the cache (resume.dat, else metadata.torrent) so it seeds again.
 
         They are added paused; the library hands them to libtorrent gradually."""
-        if self.settings.caching_disabled:
-            return 0
         root = self.settings.cache_dir()
         restored = 0
         for d in sorted(root.iterdir()) if root.exists() else []:

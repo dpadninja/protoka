@@ -89,13 +89,15 @@ async def serve(args: argparse.Namespace) -> None:
     app_path = args.app_path or default_app_path()
     ensure_writable(app_path)
     log.info("Using app path -> %s", app_path)
+    if (app_path / "server-settings.json").exists():
+        log.info("Ignoring %s: settings come from the environment only", app_path / "server-settings.json")
     settings = Settings(app_path)
     try:
         forced = env_overrides(os.environ)
         if args.bt_port is not None:
             forced["btListenPort"] = args.bt_port
         if forced:
-            settings.save(forced)  # validates cacheRoot (creates it, checks it is a directory)
+            settings.update(forced)  # validates cacheRoot (creates it, checks it is a directory)
     except (EnvError, SettingsError) as e:
         raise SystemExit(f"configuration error: {e}") from e
     log.info(

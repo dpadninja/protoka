@@ -130,7 +130,7 @@ def settings(app_path: Path) -> Settings:
     s = Settings(app_path)
     # the host's /usr/share/fonts must not change test results: no bundled fonts unless a test adds some
     (app_path / "no-fonts").mkdir()
-    s.save({"fallbackFontsDir": str(app_path / "no-fonts")})
+    s.update({"fallbackFontsDir": str(app_path / "no-fonts")})
     return s
 
 

@@ -1,0 +1,53 @@
+# protoka on TrueNAS: Apps → Discover Apps → ⋮ → Install via YAML, paste this file as is.
+# Then in Stremio: Settings → Streaming server URL → http://<TrueNAS IP>:11470.
+#
+# Optional:
+#   - settings: the `environment` entries below;
+#   - incoming peers: forward 42069 TCP+UDP on the router, or use host networking (below).
+services:
+  protoka:
+    image: horsetail/protoka:latest
+    pull_policy: always
+    restart: unless-stopped
+    stop_grace_period: 30s  # time to save the DHT routing table on stop
+    ports:
+      - "11470:11470"      # HTTP API, the Stremio "Streaming server URL"
+      - "42069:42069/tcp"  # BitTorrent
+      - "42069:42069/udp"  # BitTorrent (uTP, DHT)
+    # network_mode: host  # instead of `ports`: protoka then opens 42069 on the router itself (UPnP / NAT-PMP)
+    environment:  # the defaults; see https://github.com/dpadninja/protoka#configuration
+      # cache
+      CACHE_SIZE: "128G"         # cache budget: 128G, 512M, unlimited
+      MIN_FREE_DISK: "2G"        # evict when the disk has less free space than this
+      CACHE_KEEP_RECENT: "24h"   # CACHE_SIZE never evicts what was watched this recently (0 = off)
+      BT_MAX_CONNECTIONS: "200"  # connections per torrent being watched
+      BT_DOWNLOAD_LIMIT: "0"     # download cap per torrent, bytes/s: 2M (0 = unlimited; a cap slows every request)
+      # playback
+      SUBTITLES_MUX: "true"      # embed the torrent's external subtitles and fonts into the video
+      PREFERRED_AUDIO_LANG: ""   # an external dub in this language becomes the default track: rus, en, japanese…
+      MUX_AUDIO_WAIT: "90"       # seconds to wait for an audio repack before playback (0 = add it next time)
+      MUX_REPACK_CONCURRENCY: "1"  # audio repacks running at once
+      FONT_FALLBACK: "1"         # replace missing subtitle fonts with bundled ones (0 = leave it to the player)
+      STREAM_GRACE: "120"        # seconds a torrent still counts as watched after the last request
+      PREFETCH_NEXT: "true"      # download the next episode once the watched one is on disk
+      # seeding
+      SEED_UPLOAD_LIMIT: "0"     # total upload, bytes/s: 2M, 512K (0 = unlimited)
+      STREAM_BG_UPLOAD_LIMIT: "0"  # upload of the other torrents while watching (0 = unlimited)
+      SEED_RATIO_LIMIT: "0"      # stop seeding a torrent at this ratio, e.g. 2.0 (0 = never)
+      SEED_TIME_LIMIT: "0"       # stop seeding a torrent after this time, e.g. 7d (0 = never)
+      SEED_MAX_ACTIVE: "0"       # torrents seeding at once, the rest wait in turn (0 = all)
+      BG_MAX_CONNECTIONS: "20"   # connections per torrent that nobody is watching
+      LOG_LEVEL: "INFO"          # DEBUG also logs every range request and ffmpeg command
+    volumes:
+      - data:/data  # settings, DHT state and the torrent cache
+    # protoka writes only to /data and /tmp and needs no capabilities
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  data:

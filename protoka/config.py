@@ -1,11 +1,11 @@
-"""Server settings, persisted as `<APP_PATH>/server-settings.json` (same file/keys as upstream).
+"""Server settings: the defaults plus the environment, fixed for the life of the process.
 
-Upstream reference: analysis/server-v4.22.5.js ~line 12979 (settings module) and 36435 (getOptions).
+Keys and `/settings` shape follow upstream (analysis/server-v4.22.5.js ~line 12979 settings module, 36435
+getOptions), but nothing is persisted and Stremio cannot change them: the server is configured where it runs.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import tempfile
@@ -16,11 +16,9 @@ from protoka import COMPAT_SERVER_VERSION
 
 log = logging.getLogger(__name__)
 
-SETTINGS_FILE = "server-settings.json"
-
 # Upstream defaults, except btMaxConnections (55 upstream; raised — see analysis/02-peer-discovery.md P6).
 DEFAULTS: dict[str, Any] = {
-    "cacheSize": 50 * 1024**3,  # 50 GB (upstream: 2 GB); everything in the cache keeps seeding
+    "cacheSize": 128 * 1024**3,  # 128 GB (upstream: 2 GB); everything in the cache keeps seeding
     "btMaxConnections": 200,
     "btHandshakeTimeout": 20000,
     "btRequestTimeout": 4000,
@@ -65,9 +63,7 @@ DEFAULTS: dict[str, Any] = {
     "minFreeDisk": 2 * 1024**3,
     # CACHE_SIZE never evicts a torrent watched within this many seconds (0 = off); low disk space still does
     "cacheKeepRecent": 24 * 3600.0,
-    "settingsVersion": 2,
 }
-OLD_DEFAULT_CACHE_SIZE = 2147483648
 
 POSITIVE_INT_KEYS = (
     "btMaxConnections",
@@ -97,42 +93,24 @@ class SettingsError(ValueError):
 
 
 class Settings:
-    """Dict-like settings with atomic save. `values()` is what `/settings` returns as `values`."""
+    """Dict-like settings: `DEFAULTS` + `update()` (the environment at startup, tests). Never saved.
+
+    `values()` is what `GET /settings` returns as `values`."""
 
     def __init__(self, app_path: Path):
         self.app_path = Path(app_path)
-        self.path = self.app_path / SETTINGS_FILE
-        self._data: dict[str, Any] = {}
-        self.load()
-
-    # -- persistence -------------------------------------------------------------------------------
-    def load(self) -> None:
-        data: dict[str, Any] = {}
-        try:
-            data = json.loads(self.path.read_text("utf-8"))
-            if not isinstance(data, dict):
-                data = {}
-        except FileNotFoundError:
-            pass
-        except (OSError, ValueError) as e:
-            log.error("Cannot read settings %s: %s", self.path, e)
-        self._data = self._normalize(data)
+        self._data = self._normalize({})
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
         out = dict(DEFAULTS)
         out.update(data)
-        if "settingsVersion" not in data and data.get("cacheSize") == OLD_DEFAULT_CACHE_SIZE:
-            # settings files written before v2 store the old 2 GB default as if it were a choice
-            out["cacheSize"] = DEFAULTS["cacheSize"]
-        out["settingsVersion"] = DEFAULTS["settingsVersion"]
         for k in POSITIVE_INT_KEYS:
             if not is_positive_int(out.get(k)):
                 out[k] = DEFAULTS[k]
-        if os.environ.get("DISABLE_CACHING"):
-            out["cacheSize"] = 0
         # Upstream encodes "∞" as Infinity which JSON turns into null (B16): null == unlimited.
+        # No "no caching" mode (upstream's 0: data in memory, dropped on close).
         cs = out.get("cacheSize")
-        if cs is not None and not (isinstance(cs, (int, float)) and not isinstance(cs, bool) and cs >= 0):
+        if cs is not None and not (isinstance(cs, (int, float)) and not isinstance(cs, bool) and cs > 0):
             out["cacheSize"] = DEFAULTS["cacheSize"]
         if not isinstance(out.get("cacheRoot"), str) or not out["cacheRoot"]:
             out["cacheRoot"] = str(self.app_path)
@@ -148,19 +126,10 @@ class Settings:
         out["serverVersion"] = COMPAT_SERVER_VERSION
         return out
 
-    def save(self, changes: dict[str, Any] | None = None) -> None:
-        new = self._normalize({**self._data, **(changes or {})})
-        if "cacheRoot" in (changes or {}):
+    def update(self, changes: dict[str, Any]) -> None:
+        new = self._normalize({**self._data, **changes})
+        if "cacheRoot" in changes:
             new["cacheRoot"] = validate_cache_root(new["cacheRoot"])
-        self.app_path.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=SETTINGS_FILE + ".", suffix=".tmp", dir=self.app_path)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(new, f, indent=4)
-            os.replace(tmp, self.path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
         self._data = new
 
     # -- access ------------------------------------------------------------------------------------
@@ -178,10 +147,6 @@ class Settings:
         """Bytes; inf when unlimited."""
         cs = self._data.get("cacheSize")
         return float("inf") if cs is None else float(cs)
-
-    @property
-    def caching_disabled(self) -> bool:
-        return self.cache_size == 0
 
     def cache_dir(self) -> Path:
         """`<cacheRoot>/stremio-cache`, falling back to the temp dir like upstream."""
@@ -237,12 +202,12 @@ def settings_options(settings: Settings, ipv4_addresses: list[str]) -> list[dict
             "class": "caching",
             "icon": True,
             "selections": [
-                {"name": "no caching", "val": 0},
                 {"name": "2GB", "val": 2147483648},
                 {"name": "5GB", "val": 5368709120},
                 {"name": "10GB", "val": 10737418240},
                 {"name": "50GB", "val": 50 * 1024**3},
                 {"name": "100GB", "val": 100 * 1024**3},
+                {"name": "128GB", "val": 128 * 1024**3},
                 {"name": "200GB", "val": 200 * 1024**3},
                 {"name": "∞", "val": None},
             ],
@@ -275,14 +240,14 @@ def parse_size(value: str) -> int | None:
     try:
         n = float(num)
     except ValueError as e:
-        raise EnvError(f"invalid size {value!r} (examples: 0, 50G, 512M, unlimited)") from e
+        raise EnvError(f"invalid size {value!r} (examples: 128G, 512M, unlimited)") from e
     if n < 0:
         raise EnvError(f"size must not be negative: {value!r}")
     return int(n * _SIZE_UNITS[unit])
 
 
 def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
-    """Settings forced by environment variables at every start (they win over saved settings).
+    """Settings from environment variables: the only way to configure the server (see README).
 
     BT_PORT     BitTorrent listen port (must match the port forwarded/published for the container)
     PREFERRED_AUDIO_LANG  sidecar audio in this language becomes the default track (ru, rus, russian)
@@ -290,7 +255,7 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
     FONT_FALLBACK         replace fonts missing from a torrent by bundled ones (on by default)
     FALLBACK_FONTS_DIR    where the bundled fonts are (/usr/share/fonts)
     CACHE_ROOT  directory of the torrent cache (e.g. a separate large dataset mounted at /cache)
-    CACHE_SIZE  cache size limit: bytes, 50G, 512M, 0 (no caching) or unlimited
+    CACHE_SIZE  cache size limit: bytes, 128G, 512M or unlimited (there is no "no caching" mode)
     """
     out: dict[str, Any] = {}
     if raw := environ.get("BT_PORT", "").strip():
@@ -302,7 +267,19 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
             raise EnvError(f"CACHE_ROOT must be an absolute path, got {raw!r}")
         out["cacheRoot"] = raw
     if raw := environ.get("CACHE_SIZE", "").strip():
-        out["cacheSize"] = parse_size(raw)
+        size = parse_size(raw)
+        if size == 0:
+            raise EnvError("CACHE_SIZE must be above 0 (128G, 512M, unlimited): there is no no-caching mode")
+        out["cacheSize"] = size
+    if raw := environ.get("BT_MAX_CONNECTIONS", "").strip():
+        if not raw.isdigit() or int(raw) == 0:
+            raise EnvError(f"BT_MAX_CONNECTIONS must be a whole number > 0, got {raw!r}")
+        out["btMaxConnections"] = int(raw)
+    if raw := environ.get("BT_DOWNLOAD_LIMIT", "").strip():
+        limit = parse_size(raw)
+        out["btDownloadLimit"] = 0 if limit is None else limit  # "unlimited" = 0 = no limit
+    if raw := environ.get("SUBTITLES_MUX", "").strip():
+        out["subtitlesMux"] = parse_bool(raw, "SUBTITLES_MUX")
     if raw := environ.get("PREFERRED_AUDIO_LANG", "").strip():
         out["preferredAudioLang"] = normalize_lang(raw)
     sizes = {

@@ -206,7 +206,7 @@ async def test_cache_full_evicts_the_least_recently_watched(client, torrent_sess
     await watch(client, torrent_session, old, "Old.mkv")
     await stop_watching(client, torrent_session, old.info_hash)
     torrent_session.get(old.info_hash).last_watched = time.time() - 2 * 86400  # beyond CACHE_KEEP_RECENT
-    torrent_session.settings.save({"cacheSize": 1_000_000})  # room for one of them
+    torrent_session.settings.update({"cacheSize": 1_000_000})  # room for one of them
     torrent_session.library._sizes_at = 0  # rescan disk usage now
 
     await watch(client, torrent_session, new, "New.mkv")
@@ -236,7 +236,7 @@ async def test_cache_full_keeps_what_was_just_watched_and_says_so_once(
     new = make_seed({"New.mkv": os.urandom(700_000)}, top="New")
     await watch(client, torrent_session, old, "Old.mkv")
     await stop_watching(client, torrent_session, old.info_hash)
-    torrent_session.settings.save({"cacheSize": 1_000_000})
+    torrent_session.settings.update({"cacheSize": 1_000_000})
     await watch(client, torrent_session, new, "New.mkv")
     for _ in range(3):
         torrent_session.library._sizes_at = 0
@@ -255,7 +255,7 @@ async def test_cache_full_keeps_what_was_just_watched_and_says_so_once(
 
 
 async def test_background_upload_is_shared_while_watching(client, torrent_session, make_seed):
-    torrent_session.settings.save({"streamBgUploadLimit": 200_000})
+    torrent_session.settings.update({"streamBgUploadLimit": 200_000})
     a = make_seed({"A.mkv": os.urandom(300_000)}, top="A")
     b = make_seed({"B.mkv": os.urandom(300_000)}, top="B")
     await watch(client, torrent_session, a, "A.mkv")

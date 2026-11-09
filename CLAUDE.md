@@ -31,10 +31,9 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
   `# noqa: S…` with a reason. Base images are pinned by digest; actions by commit SHA (zizmor checks the workflows).
   The image runs as UID 10001; `/data` is `10001:0` mode 0770 (arbitrary UIDs run with GID 0); bind mounts need
   `--user <owner>` (TrueNAS: 568:568). Never make it world-writable.
-  Container config is env-only: `BT_PORT`, `CACHE_ROOT`, `CACHE_SIZE`, `PREFERRED_AUDIO_LANG`, `MUX_AUDIO_WAIT`,
-  `FONT_FALLBACK`, `FALLBACK_FONTS_DIR`,
-  `PORT`, `APP_PATH`, `LOG_LEVEL`
-  (`config.env_overrides`, applied on every start over saved settings). One mount point `/data`:
+  Config is env-only (README table; `config.env_overrides` → `Settings.update` at startup): nothing is saved,
+  `POST /settings` answers success and changes nothing (stremio-core needs `GET /settings` for `baseUrl` and
+  resets its server state on a failed POST). There is no "no caching" mode. One mount point `/data`:
   `/data/config` (APP_PATH) and `/data/stremio-cache` (CACHE_ROOT=/data).
 - Docker (Alpine; libtorrent from its musllinux wheel via uv): `docker compose up -d` (named volume `stremio-data:/data`
   keeps DHT state and cache) or `docker build -t protoka .`
