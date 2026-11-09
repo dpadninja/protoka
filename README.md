@@ -72,6 +72,19 @@ the Stremio app and point it at protoka.
 > protoka writes only to `/data` and `/tmp` and needs no capabilities, so it also runs locked down:
 > `--read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`.
 
+### TrueNAS
+
+1. *Apps → Discover Apps → ⋮ → Install via YAML*, paste [`truenas/compose.yaml`](truenas/compose.yaml) as is.
+2. Point Stremio at `http://<TrueNAS IP>:11470`.
+
+Nothing to set up, as with the catalog apps: the data goes to an app volume that TrueNAS manages, a short
+`permissions` step hands it to the `apps` user (568), and protoka runs as that user, locked down (read-only root,
+no capabilities), with 30 s on stop to save the DHT state.
+
+Optional: your own dataset instead of the volume (replace `data:/data` with `/mnt/<pool>/<dataset>:/data` in
+both services; no ACL preset needed), settings as `environment` entries (see [Configuration](#configuration)),
+a pinned version (`horsetail/protoka:0.2.0`) instead of `:latest`.
+
 ## Configuration
 
 Environment variables are applied on every start and override saved settings. All of them are optional.

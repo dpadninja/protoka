@@ -1,0 +1,47 @@
+# protoka on TrueNAS: Apps → Discover Apps → ⋮ → Install via YAML, paste this file as is.
+# Then in Stremio: Settings → Streaming server URL → http://<TrueNAS IP>:11470.
+#
+# Optional:
+#   - your own dataset instead of the app volume: replace `data:/data` with `/mnt/<pool>/<dataset>:/data`
+#     (both services); the permissions step makes it writable, no ACL preset needed;
+#   - settings: the `environment` entries, see https://github.com/dpadninja/protoka#configuration;
+#   - incoming peers: forward 42069 TCP+UDP on the router, or use host networking (below).
+services:
+  # like the permissions container of TrueNAS catalog apps: makes /data belong to the apps user (568), then exits
+  permissions:
+    image: horsetail/protoka:latest
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", '[ "$$(stat -c %u:%g /data)" = 568:568 ] || chown -R 568:568 /data']
+    volumes:
+      - data:/data
+
+  protoka:
+    image: horsetail/protoka:latest  # pin a version (horsetail/protoka:0.2.0) to update deliberately
+    depends_on:
+      permissions:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    user: "568:568"  # the TrueNAS apps user
+    stop_grace_period: 30s  # time to save the DHT routing table on stop
+    ports:
+      - "11470:11470"      # HTTP API, the Stremio "Streaming server URL"
+      - "42069:42069/tcp"  # BitTorrent
+      - "42069:42069/udp"  # BitTorrent (uTP, DHT)
+    # network_mode: host  # instead of `ports`: protoka then opens 42069 on the router itself (UPnP / NAT-PMP)
+    environment:
+      CACHE_SIZE: 50G  # cache budget: 50G, 512M, unlimited, 0 = no caching
+    volumes:
+      - data:/data  # settings, DHT state and the torrent cache
+    # protoka writes only to /data and /tmp and needs no capabilities
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  data:
