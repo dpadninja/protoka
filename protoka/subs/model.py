@@ -43,6 +43,9 @@ class FileName:
     lang_tokens: tuple[str, ...]  # ("rus",)  language-ish tokens found in the name
     group: str | None  # "Grp"  leading [Group] tag
     episode_source: str = ""  # "name" | "folder 'Show.S01E02'" | "" — for explanations
+    # ("title",)  the series tokens before the episode number only: what stays the same from episode to
+    # episode when names carry an episode title ("Show.S01E01.Part.I…"); () when the name has no number
+    show: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

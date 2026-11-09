@@ -1,9 +1,11 @@
 """Which file comes after the one being watched, and which files make up an episode. Pure.
 
-Next episode: same title tokens (`series`) and season, the smallest episode number greater than the
-current one (`Title - 05` → `Title - 06`, `S01E09` → `S01E10`, `05` → `05.5` if that exists). An OVA or
-another season is a different series and never "next". Files without episode numbers: the next video in
-natural order in the same folder.
+Next episode: same show and season, the smallest episode number greater than the current one
+(`Title - 05` → `Title - 06`, `S01E09` → `S01E10`, `05` → `05.5` if that exists). The show is the title
+before the episode number (`FileName.show`), so an episode title after it does not count
+(`Show.S01E01.Part.I…` → `Show.S01E02.Part.II…`); a name with nothing before the number falls back to all
+its title tokens. An OVA or another season is a different series and never "next". Files without episode
+numbers: the next video in natural order in the same folder.
 
 An episode = the video and every file playing it needs on disk: matched subtitles, matched external audio
 and the font files its subtitles may use. The next episode is downloaded whole,
@@ -32,7 +34,7 @@ def next_video(files: Sequence[FileName], current_idx: int) -> FileName | None:
             f
             for f in videos
             if f.episode is not None
-            and f.series == current.series
+            and _show(f) == _show(current)
             and f.episode.season == current.episode.season
             and f.episode.number > current.episode.number
         ]
@@ -42,6 +44,10 @@ def next_video(files: Sequence[FileName], current_idx: int) -> FileName | None:
     siblings = sorted((f for f in videos if f.folders == current.folders), key=lambda f: _natural_key(f.path))
     after = [f for f in siblings if _natural_key(f.path) > _natural_key(current.path)]
     return after[0] if after else None
+
+
+def _show(f: FileName) -> tuple[str, ...]:
+    return f.show or f.series
 
 
 def episode_files(files: Sequence[FileName], video_idx: int) -> list[int]:

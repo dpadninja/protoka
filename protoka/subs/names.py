@@ -219,7 +219,8 @@ def parse_file(index: int, path: str, size: int = 0) -> FileName:
                 episode, episode_source = folder_ep, f"folder {folder!r}"
                 break
     title = core if span is None else (core[: span[0]] + " " + core[span[1] :])
-    series = tuple(t for t in re.split(r"[\s\-–—~,!:;]+", title) if t and not t.isdigit())
+    series = _title_tokens(title)
+    show = _title_tokens(core[: span[0]]) if span is not None and episode_source == "name" else ()
     return FileName(
         index=index,
         path=str(p),
@@ -234,7 +235,12 @@ def parse_file(index: int, path: str, size: int = 0) -> FileName:
         lang_tokens=tuple(lang_tokens),
         group=group,
         episode_source=episode_source,
+        show=show,
     )
+
+
+def _title_tokens(title: str) -> tuple[str, ...]:
+    return tuple(t for t in re.split(r"[\s\-–—~,!:;]+", title) if t and not t.isdigit())
 
 
 def parse_files(files: Sequence[dict[str, Any]]) -> list[FileName]:
