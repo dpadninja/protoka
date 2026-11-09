@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import resource
 import subprocess
 from pathlib import Path
@@ -49,8 +50,11 @@ def test_whitelists_name_real_demuxers():
     out = subprocess.run(
         [FFMPEG, "-hide_banner", "-demuxers"], capture_output=True, text=True, check=True
     ).stdout
-    rows = out.split("---", 1)[1].splitlines()
-    known = {n for line in rows if line.strip() for n in line.split()[1].split(",")}
+    # rows " D   matroska,webm   Matroska / WebM"; the legend (" D.. = Demuxing…") and the separator
+    # ("---", or " --" in older ffmpeg) do not match
+    rows = re.findall(r"^ D\S*\s+([\w,]+)\s", out, re.MULTILINE)
+    known = {n for names in rows for n in names.split(",")}
+    assert "matroska" in known, out[:300]
     for name in f"{ffmpeg.VIDEO_DEMUXERS},{ffmpeg.AUDIO_DEMUXERS}".split(","):
         assert name in known, name
 
