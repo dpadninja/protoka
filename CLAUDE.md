@@ -93,6 +93,8 @@ All dependencies are managed with **uv** (add with `uv add …`, never pip).
 - Mux builds run in a service-owned task (`MuxService._run_build`) awaited via `asyncio.shield`: a request that is
   cancelled (client disconnect) must not leave the shared cache entry unfinished.
 - `ffmpeg -err_detect crccheck` does not verify cluster CRC-32s: test CRCs with an independent implementation.
+- ffmpeg/ffprobe read torrent files only through `mux/ffmpeg.url_input` (media demuxers, HTTP to ourselves) and
+  `limit()` every process; a local path is refused, so tests serve files with the `http_url` fixture.
 - CPU-heavy pure steps (charset detection, fontTools) run in `asyncio.to_thread`.
 - The libtorrent binding cannot read `session_params.dht_state.nodes` (TypeError); count nodes from the bencoded
   state with `session.count_saved_nodes`.

@@ -53,9 +53,9 @@ async def test_cancelled_waiter_frees_its_place():
 
 
 @needs_ffmpeg
-async def test_a_new_remux_of_the_same_file_replaces_the_old_one(tmp_path):
-    src = make_video(tmp_path / "v.avi", 20, container="avi")
-    plan = lambda: ffmpeg.FfmpegPlan(str(src), [], [], {})  # noqa: E731
+async def test_a_new_remux_of_the_same_file_replaces_the_old_one(tmp_path, http_url):
+    src = http_url(make_video(tmp_path / "v.avi", 20, container="avi"))
+    plan = lambda: ffmpeg.FfmpegPlan(src, [], [], {})  # noqa: E731
 
     async def total(gen) -> int:
         return sum([len(c) async for c in gen])
@@ -67,4 +67,4 @@ async def test_a_new_remux_of_the_same_file_replaces_the_old_one(tmp_path):
     rest = await total(first)
     assert second == full  # the newest connection gets everything
     assert len(head) + rest < full  # the old ffmpeg was stopped instead of running to the end
-    assert str(src) not in ffmpeg._running
+    assert src not in ffmpeg._running

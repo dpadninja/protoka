@@ -216,12 +216,12 @@ def test_patch_rejects_garbage_and_unknown_tracks(media):
     assert len(patched) == len(chunk) and patched != chunk
 
 
-async def test_raw_stream_is_repacked_to_a_compatible_mka(media, tmp_path):
+async def test_raw_stream_is_repacked_to_a_compatible_mka(media, tmp_path, http_url):
     out = convert.converted_path(tmp_path, 5)
-    path = await asyncio.wait_for(convert.ensure_mka(str(media["ac3"]), out), 60)
+    path = await asyncio.wait_for(convert.ensure_mka(http_url(media["ac3"]), out), 60)
     assert path == out and out.exists() and not out.with_name(out.name + ".part").exists()
     side = await index_of(path)
     assert audio_mod.check_compatible(await index_of(media["video"]), side) == []
     assert packets_md5(str(path), "0:a:0") == packets_md5(str(media["ac3"]), "0:a:0")  # -c copy: same frames
-    again = convert.ensure_mka(str(media["ac3"]), out)  # cached: finished task / existing file
+    again = convert.ensure_mka(http_url(media["ac3"]), out)  # cached: finished task / existing file
     assert await again == out
