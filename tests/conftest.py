@@ -147,6 +147,17 @@ async def client(aiohttp_client, torrent_session: TorrentSession):
     return c
 
 
+@pytest.fixture
+async def http_url(aiohttp_server):
+    """`http_url(path)`: a local file served over HTTP, the only way our ffmpeg may read a source."""
+    from aiohttp import web
+
+    app = web.Application()
+    app.router.add_static("/", "/", follow_symlinks=False)
+    server = await aiohttp_server(app)
+    return lambda path: str(server.make_url(str(Path(path).resolve())))
+
+
 def connect_to_seed(session: TorrentSession, ih: str, seed: Seed) -> None:
     e = session.get(ih)
     assert e is not None

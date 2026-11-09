@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from protoka import logfmt
-from protoka.mux.ffmpeg import ffmpeg_binary
+from protoka.mux.ffmpeg import AUDIO_DEMUXERS, ffmpeg_binary, limit, url_input
 
 log = logging.getLogger(__name__)
 
@@ -131,7 +131,8 @@ async def _repack(source_url: str, out: Path, tag: str = "") -> Path:
         raise FileNotFoundError("ffmpeg is not installed")
     out.parent.mkdir(parents=True, exist_ok=True)
     part = out.with_name(out.name + ".part")
-    cmd = [binary, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", source_url,
+    cmd = [binary, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+           *url_input(source_url, AUDIO_DEMUXERS),
            "-map", "0:a", "-c", "copy", "-f", "matroska",
            "-cluster_time_limit", "2000", str(part)]  # fmt: skip
     log.info("%s audio: repack started (ffmpeg -c copy → .mka)", tag)
@@ -139,6 +140,7 @@ async def _repack(source_url: str, out: Path, tag: str = "") -> Path:
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
     )
+    limit(proc)
     try:
         _, err = await proc.communicate()
     finally:
@@ -148,7 +150,9 @@ async def _repack(source_url: str, out: Path, tag: str = "") -> Path:
             await proc.wait()
     if proc.returncode:
         part.unlink(missing_ok=True)
-        reason = f"ffmpeg exited with {proc.returncode}: {err.decode(errors='replace')[-300:]}"
+        lines = err.decode(errors="replace").strip().splitlines() or [""]
+        detail = lines[0] if len(lines) == 1 else f"{lines[0]} … {lines[-1]}"  # the cause, then the outcome
+        reason = f"ffmpeg exited with {proc.returncode}: {detail[:500]}"
         log.warning("%s audio: repack failed: %s", tag, reason)
         raise RuntimeError(reason)
     os.replace(part, out)

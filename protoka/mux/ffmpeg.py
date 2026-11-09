@@ -7,6 +7,11 @@ ffmpeg reads the source through our own HTTP endpoint, so it can seek inside it 
 AVI index) while pieces are fetched from the torrent on demand. The output is a pipe: it can be played
 from the start but not seeked (no Content-Length / Range) — that is the price for not re-implementing
 AVI/MP4 muxing.
+
+Every input is untrusted (any torrent file), so ffmpeg never picks a demuxer or protocol freely
+(analysis/28-ffmpeg-whitelist.md): `url_input` allows only media demuxers (no concat, HLS, image2…) and
+only HTTP to our own server, our subtitle files are opened with a fixed demuxer, and `limit` caps a
+runaway process. A refused input is an ordinary ffmpeg failure, handled by the existing fallbacks.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import resource
 import shutil
 import tempfile
 from collections.abc import AsyncIterator, Sequence
@@ -28,6 +34,34 @@ log = logging.getLogger(__name__)
 
 CHUNK = 256 * 1024
 _running: dict[str, asyncio.subprocess.Process] = {}  # source URL -> the ffmpeg remuxing it
+
+
+# demuxers allowed on torrent files; ffmpeg matches any of a demuxer's names (`mov` = mov,mp4,m4a,…)
+VIDEO_DEMUXERS = "matroska,mov,avi,asf,mpeg,mpegts,flv,ogg,rm"  # every subs.names.VIDEO_EXTS container
+AUDIO_DEMUXERS = (
+    "matroska,mov,ac3,eac3,dts,dtshd,truehd,mlp,aac,flac,mp3,wav,w64,ogg"  # .mka + RAW_AUDIO_EXTS
+)
+STALL_SECONDS = 300  # no bytes from the torrent for this long (no peers) → ffmpeg gives up
+MAX_ADDRESS_SPACE = 2 * 1024**3  # `-c copy` needs far less; only a runaway process hits these
+MAX_CPU_SECONDS = 3600
+
+
+def url_input(url: str, demuxers: str) -> list[str]:
+    """`-i url` for a file read through our own HTTP endpoint: these demuxers only, HTTP only (nested
+    opens inherit the protocol whitelist, so no `file:` and no other hosts' schemes), and a stall timeout."""
+    return [
+        "-protocol_whitelist", "http,tcp",
+        "-rw_timeout", str(STALL_SECONDS * 1_000_000),
+        "-format_whitelist", demuxers,
+        "-i", url,
+    ]  # fmt: skip
+
+
+def limit(proc: asyncio.subprocess.Process) -> None:
+    """Cap memory and CPU of a child just started (not via preexec_fn: unsafe with our worker threads)."""
+    for res, value in ((resource.RLIMIT_AS, MAX_ADDRESS_SPACE), (resource.RLIMIT_CPU, MAX_CPU_SECONDS)):
+        with contextlib.suppress(OSError, AttributeError):  # exited already / no prlimit off Linux
+            resource.prlimit(proc.pid, res, (value, value))
 
 
 def ffmpeg_binary() -> str | None:
@@ -73,14 +107,14 @@ def command(binary: str, plan: FfmpegPlan, workdir: Path) -> list[str]:
         "-nostdin",
         "-fflags",
         "+genpts",
-        "-i",
-        plan.source_url,
+        *url_input(plan.source_url, VIDEO_DEMUXERS),
     ]
     sub_files = [_subtitle_file(t, workdir, i) for i, t in enumerate(plan.tracks)]
-    for p in sub_files:
-        cmd += ["-i", str(p)]
+    for p in sub_files:  # written by us: the demuxer is fixed by the extension we chose
+        fmt = "srt" if p.suffix == ".srt" else "ass"  # the `ass` demuxer reads SSA too
+        cmd += ["-protocol_whitelist", "file", "-f", fmt, "-i", str(p)]
     for a in plan.audio:
-        cmd += ["-i", a.url]
+        cmd += url_input(a.url, AUDIO_DEMUXERS)
     cmd += ["-map", "0:v", "-map", "0:a?"]
     first_audio_input = 1 + len(sub_files)
     for k in range(len(plan.audio)):
@@ -114,9 +148,11 @@ async def count_audio_streams(url: str) -> int:
     if probe is None:
         return 1
     proc = await asyncio.create_subprocess_exec(
-        probe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", url,
+        probe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0",
+        *url_input(url, VIDEO_DEMUXERS),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
     )  # fmt: skip
+    limit(proc)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), 30)
     except TimeoutError:
@@ -153,6 +189,7 @@ async def stream(plan: FfmpegPlan) -> AsyncIterator[bytes]:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
+        limit(proc)
         _running[plan.source_url] = proc
         if proc.stdout is None or proc.stderr is None:  # cannot happen with PIPE; not an assert (python -O)
             raise RuntimeError("ffmpeg started without pipes")

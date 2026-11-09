@@ -213,6 +213,9 @@ Images are published only after they pass the same checks locally (`scripts/publ
 - **Hardened image.** Base images are pinned by digest, `apk upgrade` runs at build time, pip is removed. The
   container runs as UID 10001, and `/data` is writable only for that user and GID 0 (arbitrary UIDs, OpenShift
   style), not for everyone.
+- **Untrusted media.** ffmpeg and ffprobe open torrent files only with media demuxers (no concat, HLS or image
+  sequences) and only over HTTP from protoka itself, so a crafted file cannot make them read local files or
+  other hosts. Each process is capped in memory and CPU time and gives up after 5 minutes without data.
 - **CI on every push and PR.** ruff with the bandit rules, mypy, the tests, the Trivy scans (reports in
   *Security → Code scanning*), CodeQL and [zizmor](https://docs.zizmor.sh) on the workflows. Actions are pinned by
   commit SHA.
