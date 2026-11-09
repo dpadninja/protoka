@@ -150,12 +150,6 @@ class TorrentSession:
         params.settings = self.settings_pack()  # type: ignore[assignment]  # the binding takes dicts
         return lt.session(params)
 
-    def apply_settings(self) -> None:
-        """Re-apply settings after POST /settings."""
-        self.ses.apply_settings(self.settings_pack())  # type: ignore[arg-type]  # dicts are accepted
-        for e in self.engines.values():
-            self._apply_torrent_limits(e.handle)
-
     def _apply_torrent_limits(self, h: lt.torrent_handle) -> None:
         h.set_max_connections(self.settings["btMaxConnections"])
         # btDownloadSpeedSoft/HardLimit are kept only for UI compatibility: upstream paused the swarm

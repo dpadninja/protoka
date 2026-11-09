@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -15,7 +14,7 @@ import psutil
 from aiohttp import web
 
 from protoka import http_subtitles, logfmt
-from protoka.config import SettingsError, settings_options
+from protoka.config import settings_options
 from protoka.cors import origin_allowed
 from protoka.engine import Engine, EngineError
 from protoka.guess import file_must_include, guess_file_idx
@@ -369,16 +368,9 @@ async def get_settings(request: web.Request) -> web.Response:
 
 
 async def post_settings(request: web.Request) -> web.Response:
-    ses = session_of(request)
-    body = await read_body(request)
-    try:
-        await asyncio.to_thread(ses.settings.save, body)
-    except SettingsError as e:
-        return json_response({"error": str(e)}, status=e.status, headers={"Cache-Control": "no-store"})
-    except OSError as e:
-        return json_response({"error": str(e)}, status=500, headers={"Cache-Control": "no-store"})
-    ses.apply_settings()
-    ses.library.poke()  # new limits / cache size take effect on the next tick
+    """Stremio's settings screen: accepted and ignored. The server is configured by its environment only
+    (it downloads and stores for the client, so the client has nothing to decide); stremio-core still needs
+    a success here, a failed POST resets its whole streaming-server state."""
     return json_response({"success": True}, headers={"Cache-Control": "no-store"})
 
 

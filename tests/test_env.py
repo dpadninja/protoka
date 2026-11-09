@@ -40,6 +40,19 @@ def test_env_overrides():
     assert env_overrides({"BT_PORT": " ", "CACHE_SIZE": ""}) == {}
 
 
+def test_env_overrides_for_former_post_only_settings():
+    env = {"BT_MAX_CONNECTIONS": "80", "BT_DOWNLOAD_LIMIT": "2M", "SUBTITLES_MUX": "off"}
+    assert env_overrides(env) == {
+        "btMaxConnections": 80,
+        "btDownloadLimit": 2 * 1024**2,
+        "subtitlesMux": False,
+    }
+    assert env_overrides({"BT_DOWNLOAD_LIMIT": "unlimited"}) == {"btDownloadLimit": 0}
+    for bad in ({"BT_MAX_CONNECTIONS": "0"}, {"BT_MAX_CONNECTIONS": "x"}, {"SUBTITLES_MUX": "maybe"}):
+        with pytest.raises(EnvError):
+            env_overrides(bad)
+
+
 @pytest.mark.parametrize(
     "env,message",
     [
@@ -54,16 +67,14 @@ def test_env_overrides_errors_name_the_variable(env, message):
         env_overrides(env)
 
 
-def test_overrides_win_over_saved_settings(app_path, tmp_path):
+def test_env_overrides_apply_to_settings(app_path, tmp_path):
     s = Settings(app_path)
-    s.save({"btListenPort": 1111, "cacheSize": 5})
-    s.save(
+    s.update(
         env_overrides({"BT_PORT": "2222", "CACHE_ROOT": str(tmp_path / "cache"), "CACHE_SIZE": "unlimited"})
     )
-    again = Settings(app_path)
-    assert again["btListenPort"] == 2222
-    assert again.cache_size == float("inf")
-    assert again.cache_dir() == tmp_path / "cache" / "stremio-cache"
+    assert s["btListenPort"] == 2222
+    assert s.cache_size == float("inf")
+    assert s.cache_dir() == tmp_path / "cache" / "stremio-cache"
 
 
 def test_bad_env_stops_startup_with_a_clear_message(tmp_path):
@@ -134,34 +145,10 @@ def test_seeding_env_errors(env, message):
         env_overrides(env)
 
 
-@pytest.mark.parametrize(
-    "saved",
-    [
-        {"cacheSize": 2 * 1024**3},  # upstream / v1 default
-        {"cacheSize": 50 * 1024**3, "settingsVersion": 2},  # v2 default
-    ],
-)
-def test_old_default_cache_size_is_migrated(app_path, saved):
-    import json
-
-    (app_path / "server-settings.json").write_text(json.dumps(saved))
-    s = Settings(app_path)
-    assert s["cacheSize"] == 128 * 1024**3 and s["settingsVersion"] == 3
-    s.save({"cacheSize": saved["cacheSize"]})  # chosen explicitly after the migration: kept
-    assert Settings(app_path)["cacheSize"] == saved["cacheSize"]
-
-
-def test_a_chosen_cache_size_is_not_migrated(app_path):
-    import json
-
-    (app_path / "server-settings.json").write_text(json.dumps({"cacheSize": 50 * 1024**3}))  # v1: a choice
-    assert Settings(app_path)["cacheSize"] == 50 * 1024**3
-
-
 @pytest.mark.parametrize("value", [0, -1, "x"])
 def test_there_is_no_no_caching_mode(app_path, value):
     s = Settings(app_path)
-    s.save({"cacheSize": value})  # Stremio's old "no caching" or garbage → the default
+    s.update({"cacheSize": value})  # upstream's "no caching" or garbage → the default
     (opt,) = (o for o in settings_options(s, []) if o["id"] == "cacheSize")
     cache_choices = [c["val"] for c in opt["selections"]]
     assert s["cacheSize"] == 128 * 1024**3 and 0 not in cache_choices

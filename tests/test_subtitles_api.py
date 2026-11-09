@@ -191,7 +191,7 @@ async def test_subtitle_and_font_endpoints(client, torrent_session, anime):
 
 
 async def test_mux_can_be_disabled(client, torrent_session, anime, tmp_path):
-    torrent_session.settings.save({"subtitlesMux": False})
+    torrent_session.settings.update({"subtitlesMux": False})
     files = await start(client, torrent_session, anime)
     idx = file_index(files, "[Grp] Title - 01 [ABCD1234].mkv")
     r = await download(client, f"/{anime.info_hash}/{idx}", tmp_path / "x")
@@ -202,7 +202,7 @@ async def test_missing_fonts_are_replaced_by_bundled_ones(
     client, torrent_session, make_seed, tmp_path, caplog
 ):
     caplog.set_level(logging.INFO, logger="protoka")
-    torrent_session.settings.save({"fallbackFontsDir": str(write_fallback_fonts(tmp_path / "bundle"))})
+    torrent_session.settings.update({"fallbackFontsDir": str(write_fallback_fonts(tmp_path / "bundle"))})
     media = tmp_path / "media"
     media.mkdir()
     script = ass_script(
@@ -243,7 +243,7 @@ async def test_missing_fonts_are_replaced_by_bundled_ones(
 
 
 async def test_font_fallback_can_be_disabled(client, torrent_session, make_seed, tmp_path):
-    torrent_session.settings.save(
+    torrent_session.settings.update(
         {"fallbackFontsDir": str(write_fallback_fonts(tmp_path / "bundle")), "fontFallback": False}
     )
     media = tmp_path / "media"

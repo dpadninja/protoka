@@ -59,7 +59,7 @@ the Stremio app and point it at protoka.
    players.
 
 **Good to know:**
-- **Data:** settings, the DHT state and the torrent cache live in the `protoka-data` volume. Keep it, or the DHT
+- **Data:** the DHT state, the library state and the torrent cache live in the `protoka-data` volume. Keep it, or the DHT
   starts cold.
 - **User:** the container runs as UID 10001. With a host directory instead of a volume (`-v /srv/protoka:/data`),
   run it as the owner of that directory: `--user "$(id -u):$(id -g)"`, or `--user 568:568` for a TrueNAS dataset
@@ -90,17 +90,21 @@ a pinned version (`horsetail/protoka:0.2.0`) instead of `:latest`.
 
 ## Configuration
 
-Environment variables are applied on every start and override saved settings. All of them are optional.
+The server is configured only by environment variables, all optional. Stremio's settings screen shows these values
+but cannot change them: `POST /settings` is accepted and ignored, nothing is saved.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `11470` | HTTP API port |
 | `BT_PORT` | `42069` | BitTorrent listen port (TCP + uTP) |
-| `APP_PATH` | `~/.stremio-server` (`/data/config` in Docker) | settings, DHT state, library state |
+| `APP_PATH` | `~/.stremio-server` (`/data/config` in Docker) | DHT state, library state |
 | `CACHE_ROOT` | app path (`/data` in Docker) | the cache goes to `<CACHE_ROOT>/stremio-cache` |
 | `CACHE_SIZE` | `128G` | cache budget: `128G`, `512M`, `unlimited` (recently watched torrents may exceed it) |
 | `MIN_FREE_DISK` | `2G` | evict when the filesystem has less free space than this |
 | `CACHE_KEEP_RECENT` | `24h` | `CACHE_SIZE` never evicts what was watched this recently (`0` = off); low disk space still does |
+| `BT_MAX_CONNECTIONS` | `200` | connections per torrent being watched |
+| `BT_DOWNLOAD_LIMIT` | `0` | download cap per torrent, bytes/s (`2M`; `0` = unlimited; any cap delays each request ~0.5 s) |
+| `SUBTITLES_MUX` | `true` | embed the torrent's external subtitles and fonts into the video stream |
 | `PREFERRED_AUDIO_LANG` | — | an external dub in this language becomes the default track (`rus`, `en`, `japanese`…) |
 | `MUX_AUDIO_WAIT` | `90` | seconds to wait for a raw audio repack before playback starts (`0` = don't wait; the track is added next time) |
 | `MUX_REPACK_CONCURRENCY` | `1` | audio repacks running at once |
@@ -115,9 +119,6 @@ Environment variables are applied on every start and override saved settings. Al
 | `PREFETCH_NEXT` | `true` | once the watched episode is downloaded, download the next one with its subtitles, audio and fonts |
 | `LOG_LEVEL` | `INFO` | `DEBUG` also logs every range request and ffmpeg command |
 
-Other settings (`btMaxConnections`, `btDownloadLimit`, `subtitlesMux`…) are changed through `POST /settings`, as
-with the official server.
-
 ## HTTP API
 
 **Compatible with the official server:**
@@ -130,7 +131,7 @@ with the official server.
 | `GET`/`HEAD` | `/:infoHash/:fileIdx` | stream a file (Range); the index may also be a file name |
 | `GET` | `/stats.json`, `/:infoHash/stats.json`, `/:infoHash/:fileIdx/stats.json` | statistics (`?sys=1` adds system and DHT info) |
 | `GET` | `/:infoHash/remove`, `/removeAll` | stop watching (the torrent keeps seeding; `?purge=1` deletes it) |
-| `GET`/`POST` | `/settings` | read / change settings |
+| `GET`/`POST` | `/settings` | the effective settings; a POST succeeds and changes nothing |
 | `GET` | `/network-info`, `/device-info` | host information |
 
 **protoka additions:**

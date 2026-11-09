@@ -52,7 +52,7 @@ def audio_streams(path: Path) -> list[dict]:
 async def test_mkv_gets_external_mka_and_repacked_ac3(client, torrent_session, release, tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="protoka")
     seed, media = release
-    torrent_session.settings.save({"preferredAudioLang": "rus"})
+    torrent_session.settings.update({"preferredAudioLang": "rus"})
     files = await start(client, torrent_session, seed)
     idx = file_index(files, "[Grp] Title - 01.mkv")
     out = tmp_path / "e1.mkv"
@@ -91,7 +91,7 @@ async def test_mkv_gets_external_mka_and_repacked_ac3(client, torrent_session, r
 
 async def test_avi_gets_external_audio_through_ffmpeg(client, torrent_session, release, tmp_path):
     seed, _ = release
-    torrent_session.settings.save({"preferredAudioLang": "rus"})
+    torrent_session.settings.update({"preferredAudioLang": "rus"})
     files = await start(client, torrent_session, seed)
     idx = file_index(files, "Title - 02.avi")
     out = tmp_path / "e2.mkv"
@@ -104,7 +104,7 @@ async def test_avi_gets_external_audio_through_ffmpeg(client, torrent_session, r
 
 async def test_repack_that_misses_the_wait_is_ready_next_time(client, torrent_session, release, tmp_path):
     seed, _ = release
-    torrent_session.settings.save({"muxAudioWait": 0})
+    torrent_session.settings.update({"muxAudioWait": 0})
     files = await start(client, torrent_session, seed)
     idx = file_index(files, "[Grp] Title - 01.mkv")
     ac3 = file_index(files, "Title - 01.ac3")

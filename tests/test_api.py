@@ -244,7 +244,7 @@ async def test_reopen_after_restart_without_peers(client, seed: Seed, torrent_se
 
 
 async def test_torrent_becomes_a_seed_after_the_grace_period(client, seed: Seed, torrent_session):
-    torrent_session.settings.save({"streamGrace": 0.2})
+    torrent_session.settings.update({"streamGrace": 0.2})
     await _stream_ready(client, torrent_session, seed)
     await asyncio.sleep(0.5)
     await torrent_session.library.tick()
@@ -267,18 +267,16 @@ async def test_cors(client, monkeypatch):
     assert resp.headers["Access-Control-Allow-Methods"] == "POST, GET, OPTIONS"
 
 
-async def test_settings_roundtrip(client, app_path):
+async def test_settings_are_read_only(client, app_path):
     data = await (await client.get("/settings")).json()
     assert {"options", "values", "baseUrl"} <= set(data)
     assert data["values"]["btMaxConnections"] == 200
-    resp = await client.post("/settings", json={"btMaxConnections": 80, "cacheSize": None})
-    assert await resp.json() == {"success": True}
-    values = (await (await client.get("/settings")).json())["values"]
-    assert values["btMaxConnections"] == 80 and values["cacheSize"] is None
-
-    resp = await client.post("/settings", json={"cacheRoot": "relative/path"})
-    assert resp.status == 400
-    assert "error" in await resp.json()
+    # Stremio's settings screen: a success (stremio-core resets its server state on a failure), no effect
+    for body in ({"btMaxConnections": 80, "cacheSize": None}, {"cacheRoot": "relative/path"}):
+        resp = await client.post("/settings", json=body)
+        assert resp.status == 200 and await resp.json() == {"success": True}
+    assert (await (await client.get("/settings")).json())["values"] == data["values"]
+    assert not (app_path / "server-settings.json").exists()
 
 
 async def test_misc_routes(client):

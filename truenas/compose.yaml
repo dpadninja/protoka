@@ -20,7 +20,10 @@ services:
       CACHE_SIZE: "128G"         # cache budget: 128G, 512M, unlimited
       MIN_FREE_DISK: "2G"        # evict when the disk has less free space than this
       CACHE_KEEP_RECENT: "24h"   # CACHE_SIZE never evicts what was watched this recently (0 = off)
+      BT_MAX_CONNECTIONS: "200"  # connections per torrent being watched
+      BT_DOWNLOAD_LIMIT: "0"     # download cap per torrent, bytes/s: 2M (0 = unlimited; a cap slows every request)
       # playback
+      SUBTITLES_MUX: "true"      # embed the torrent's external subtitles and fonts into the video
       PREFERRED_AUDIO_LANG: ""   # an external dub in this language becomes the default track: rus, en, japanese…
       MUX_AUDIO_WAIT: "90"       # seconds to wait for an audio repack before playback (0 = add it next time)
       MUX_REPACK_CONCURRENCY: "1"  # audio repacks running at once

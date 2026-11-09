@@ -171,29 +171,29 @@ class TestTrackers:
 
 # -- settings --------------------------------------------------------------------------------------
 class TestSettings:
-    def test_defaults_and_persistence(self, app_path):
+    def test_defaults_and_update(self, app_path):
         s = Settings(app_path)
         assert s["btMaxConnections"] == DEFAULTS["btMaxConnections"]
         assert s["cacheRoot"] == str(app_path)
-        s.save({"btMaxConnections": 77, "custom": "kept"})
-        data = json.loads((app_path / "server-settings.json").read_text())
-        assert data["btMaxConnections"] == 77 and data["custom"] == "kept"
-        assert Settings(app_path)["btMaxConnections"] == 77
+        s.update({"btMaxConnections": 77})
+        assert s["btMaxConnections"] == 77
+
+    def test_nothing_is_read_or_written(self, app_path):
+        (app_path / "server-settings.json").write_text(json.dumps({"btMaxConnections": 77}))  # upstream / old
+        s = Settings(app_path)
+        assert s["btMaxConnections"] == DEFAULTS["btMaxConnections"]
+        s.update({"btMaxConnections": 5})
+        assert json.loads((app_path / "server-settings.json").read_text()) == {"btMaxConnections": 77}
+        assert sorted(p.name for p in app_path.iterdir()) == ["server-settings.json"]
 
     def test_invalid_values_fall_back(self, app_path):
-        (app_path / "server-settings.json").write_text(
-            json.dumps({"btMaxConnections": -3, "btHandshakeTimeout": "x", "cacheSize": "big"})
-        )
         s = Settings(app_path)
+        s.update({"btMaxConnections": -3, "btHandshakeTimeout": "x", "cacheSize": "big"})
         assert s["btMaxConnections"] == DEFAULTS["btMaxConnections"]
         assert s["btHandshakeTimeout"] == DEFAULTS["btHandshakeTimeout"]
         assert s["cacheSize"] == DEFAULTS["cacheSize"]
 
     def test_unlimited_cache(self, app_path):  # B16
         s = Settings(app_path)
-        s.save({"cacheSize": None})
-        assert Settings(app_path).cache_size == float("inf")
-
-    def test_corrupt_file(self, app_path):
-        (app_path / "server-settings.json").write_text("{not json")
-        assert Settings(app_path)["cacheSize"] == DEFAULTS["cacheSize"]
+        s.update({"cacheSize": None})
+        assert s.cache_size == float("inf")
