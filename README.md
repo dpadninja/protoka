@@ -81,6 +81,9 @@ Nothing to set up, as with the catalog apps: the data goes to an app volume that
 `permissions` step hands it to the `apps` user (568), and protoka runs as that user, locked down (read-only root,
 no capabilities), with 30 s on stop to save the DHT state.
 
+Updates come by themselves: on every start the app checks Docker Hub for a newer `:latest`, so restarting it (or
+the NAS) brings the latest release. It needs network at start: without it the app stays down until started again.
+
 Optional: your own dataset instead of the volume (replace `data:/data` with `/mnt/<pool>/<dataset>:/data` in
 both services; no ACL preset needed), settings as `environment` entries (see [Configuration](#configuration)),
 a pinned version (`horsetail/protoka:0.2.0`) instead of `:latest`.
