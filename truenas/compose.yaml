@@ -1,41 +1,40 @@
 # protoka on TrueNAS: Apps → Discover Apps → ⋮ → Install via YAML, paste this file as is.
 # Then in Stremio: Settings → Streaming server URL → http://<TrueNAS IP>:11470.
-# Updates: every start checks Docker Hub for a newer :latest (pull_policy: always), so restarting the app updates it;
-# without network at start the app does not come up until it is started again.
 #
 # Optional:
-#   - your own dataset instead of the app volume: replace `data:/data` with `/mnt/<pool>/<dataset>:/data`
-#     (both services); the permissions step makes it writable, no ACL preset needed;
-#   - settings: the `environment` entries, see https://github.com/dpadninja/protoka#configuration;
+#   - settings: the `environment` entries below;
 #   - incoming peers: forward 42069 TCP+UDP on the router, or use host networking (below).
 services:
-  # like the permissions container of TrueNAS catalog apps: makes /data belong to the apps user (568), then exits
-  permissions:
+  protoka:
     image: horsetail/protoka:latest
     pull_policy: always
-    user: "0:0"
-    network_mode: none
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c", '[ "$$(stat -c %u:%g /data)" = 568:568 ] || chown -R 568:568 /data']
-    volumes:
-      - data:/data
-
-  protoka:
-    image: horsetail/protoka:latest  # pin a version (horsetail/protoka:0.2.0) to update deliberately
-    pull_policy: always  # TrueNAS keeps a local :latest otherwise and never updates it
-    depends_on:
-      permissions:
-        condition: service_completed_successfully
     restart: unless-stopped
-    user: "568:568"  # the TrueNAS apps user
     stop_grace_period: 30s  # time to save the DHT routing table on stop
     ports:
       - "11470:11470"      # HTTP API, the Stremio "Streaming server URL"
       - "42069:42069/tcp"  # BitTorrent
       - "42069:42069/udp"  # BitTorrent (uTP, DHT)
     # network_mode: host  # instead of `ports`: protoka then opens 42069 on the router itself (UPnP / NAT-PMP)
-    environment:
-      CACHE_SIZE: 50G  # cache budget: 50G, 512M, unlimited, 0 = no caching
+    environment:  # the defaults; see https://github.com/dpadninja/protoka#configuration
+      # cache
+      CACHE_SIZE: "50G"          # cache budget: 50G, 512M, unlimited, 0 = no caching
+      MIN_FREE_DISK: "2G"        # evict when the disk has less free space than this
+      CACHE_KEEP_RECENT: "24h"   # CACHE_SIZE never evicts what was watched this recently (0 = off)
+      # playback
+      PREFERRED_AUDIO_LANG: ""   # an external dub in this language becomes the default track: rus, en, japanese…
+      MUX_AUDIO_WAIT: "90"       # seconds to wait for an audio repack before playback (0 = add it next time)
+      MUX_REPACK_CONCURRENCY: "1"  # audio repacks running at once
+      FONT_FALLBACK: "1"         # replace missing subtitle fonts with bundled ones (0 = leave it to the player)
+      STREAM_GRACE: "120"        # seconds a torrent still counts as watched after the last request
+      PREFETCH_NEXT: "true"      # download the next episode once the watched one is on disk
+      # seeding
+      SEED_UPLOAD_LIMIT: "0"     # total upload, bytes/s: 2M, 512K (0 = unlimited)
+      STREAM_BG_UPLOAD_LIMIT: "0"  # upload of the other torrents while watching (0 = unlimited)
+      SEED_RATIO_LIMIT: "0"      # stop seeding a torrent at this ratio, e.g. 2.0 (0 = never)
+      SEED_TIME_LIMIT: "0"       # stop seeding a torrent after this time, e.g. 7d (0 = never)
+      SEED_MAX_ACTIVE: "0"       # torrents seeding at once, the rest wait in turn (0 = all)
+      BG_MAX_CONNECTIONS: "20"   # connections per torrent that nobody is watching
+      LOG_LEVEL: "INFO"          # DEBUG also logs every range request and ffmpeg command
     volumes:
       - data:/data  # settings, DHT state and the torrent cache
     # protoka writes only to /data and /tmp and needs no capabilities
