@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import aiohttp
 import libtorrent as lt
@@ -145,9 +147,7 @@ async def create_from_torrent(request: web.Request) -> web.Response:
         if isinstance(blob, str):
             data = bytes.fromhex(blob)
         elif isinstance(src, str):
-            if not src.lower().startswith(("http://", "https://")):
-                # upstream read arbitrary local files here (B4)
-                return error_response("'from' must be an http(s) URL", 400)
+            await _validate_public_http_url(src)
             data = await _fetch_torrent(src)
         else:
             return error_response("expected 'blob' (hex) or 'from' (URL)", 400)
@@ -162,9 +162,45 @@ async def create_from_torrent(request: web.Request) -> web.Response:
     return json_response(engine_stats(engine))
 
 
+def _is_public_ip(ip_str: str) -> bool:
+    ip = ipaddress.ip_address(ip_str)
+    if is_internal(ip_str):
+        return False
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    ):
+        return False
+    return True
+
+
+async def _validate_public_http_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("'from' must be an http(s) URL")
+    if not parsed.hostname:
+        raise ValueError("'from' must include a hostname")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("'from' must not include credentials")
+
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(parsed.hostname, parsed.port or None, type=0)
+    if not infos:
+        raise ValueError("could not resolve 'from' hostname")
+    for info in infos:
+        sockaddr = info[4]
+        ip_str = sockaddr[0]
+        if not _is_public_ip(ip_str):
+            raise ValueError("'from' must resolve to a public IP address")
+
+
 async def _fetch_torrent(url: str) -> bytes:
     timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as cs, cs.get(url) as resp:
+    async with aiohttp.ClientSession(timeout=timeout) as cs, cs.get(url, allow_redirects=False) as resp:
         resp.raise_for_status()
         data = await resp.content.read(TORRENT_FETCH_LIMIT + 1)
         if len(data) > TORRENT_FETCH_LIMIT:
