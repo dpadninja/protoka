@@ -17,6 +17,7 @@ from protoka import http_subtitles, logfmt
 from protoka.config import settings_options
 from protoka.cors import origin_allowed
 from protoka.engine import Engine, EngineError
+from protoka.fetch import FetchRefused, fetch_torrent
 from protoka.guess import file_must_include, guess_file_idx
 from protoka.http_common import (
     INFO_KEY,
@@ -145,31 +146,24 @@ async def create_from_torrent(request: web.Request) -> web.Response:
         if isinstance(blob, str):
             data = bytes.fromhex(blob)
         elif isinstance(src, str):
-            if not src.lower().startswith(("http://", "https://")):
-                # upstream read arbitrary local files here (B4)
-                return error_response("'from' must be an http(s) URL", 400)
-            data = await _fetch_torrent(src)
+            # upstream read arbitrary local files and fetched any URL here (B4); see protoka.fetch
+            allow = session_of(request).settings["fetchAllowNetworks"]
+            data = await fetch_torrent(src, TORRENT_FETCH_LIMIT, allow)
         else:
             return error_response("expected 'blob' (hex) or 'from' (URL)", 400)
         ti = lt.torrent_info(data)
     except web.HTTPException:
         raise
+    except FetchRefused as e:
+        log.warning("/create refused %s: %s", logfmt.clean(src), e)
+        return error_response(str(e), 400)
     except (ValueError, RuntimeError, aiohttp.ClientError, TimeoutError) as e:
-        log.error("/create failed: %s", e)
-        return error_response(str(e) or type(e).__name__, 500)
+        # details stay in the log: an error text can describe the internal network or the file system
+        log.error("/create failed: %s", logfmt.clean(e))
+        return error_response("cannot load the torrent", 500)
     ih = str(ti.info_hash()).lower()
     engine = await create_and_wait(request, ih, torrent=data)
     return json_response(engine_stats(engine))
-
-
-async def _fetch_torrent(url: str) -> bytes:
-    timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as cs, cs.get(url) as resp:
-        resp.raise_for_status()
-        data = await resp.content.read(TORRENT_FETCH_LIMIT + 1)
-        if len(data) > TORRENT_FETCH_LIMIT:
-            raise ValueError("torrent file too large")
-        return data
 
 
 async def remove_engine(request: web.Request) -> web.Response:
@@ -238,7 +232,7 @@ def _want_episode(engine: Engine, idx: int) -> None:
 
 def _log_opened(engine: Engine, idx: int, muxed: object, length: int, request: web.Request) -> None:
     """INFO once per file per watching session (reset by Engine.release_memory); every request at DEBUG."""
-    what = request.headers.get("Range") or "whole file"
+    what = logfmt.clean(request.headers.get("Range") or "whole file")
     if is_internal(request):  # our own ffmpeg (repack / remux)
         log.debug("%s stream: read by ffmpeg (internal) %s", logfmt.tag(engine, idx), what)
         return

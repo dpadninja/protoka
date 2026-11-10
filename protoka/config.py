@@ -6,6 +6,7 @@ getOptions), but nothing is persisted and Stremio cannot change them: the server
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import tempfile
@@ -63,6 +64,9 @@ DEFAULTS: dict[str, Any] = {
     "minFreeDisk": 2 * 1024**3,
     # CACHE_SIZE never evicts a torrent watched within this many seconds (0 = off); low disk space still does
     "cacheKeepRecent": 24 * 3600.0,
+    # New: `/create {"from": url}` fetches only from public addresses; these networks (CIDR) are allowed too
+    # (a LAN indexer such as Jackett). Empty = public only.
+    "fetchAllowNetworks": [],
 }
 
 POSITIVE_INT_KEYS = (
@@ -116,6 +120,8 @@ class Settings:
             out["cacheRoot"] = str(self.app_path)
         if not isinstance(out.get("remoteHttps"), str):
             out["remoteHttps"] = ""
+        nets = out.get("fetchAllowNetworks")
+        out["fetchAllowNetworks"] = [str(n) for n in nets] if isinstance(nets, list) else []
         lim = out.get("btDownloadLimit")
         if not (isinstance(lim, int) and not isinstance(lim, bool) and lim >= 0):
             out["btDownloadLimit"] = 0
@@ -256,6 +262,7 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
     FALLBACK_FONTS_DIR    where the bundled fonts are (/usr/share/fonts)
     CACHE_ROOT  directory of the torrent cache (e.g. a separate large dataset mounted at /cache)
     CACHE_SIZE  cache size limit: bytes, 128G, 512M or unlimited (there is no "no caching" mode)
+    FETCH_ALLOW_NETWORKS  non-public networks `/create {"from": url}` may fetch from (192.168.1.0/24)
     """
     out: dict[str, Any] = {}
     if raw := environ.get("BT_PORT", "").strip():
@@ -333,6 +340,19 @@ def env_overrides(environ: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
         if wait < 0:
             raise EnvError(f"MUX_AUDIO_WAIT must be a number of seconds >= 0, got {raw!r}")
         out["muxAudioWait"] = wait
+    if raw := environ.get("FETCH_ALLOW_NETWORKS", "").strip():
+        out["fetchAllowNetworks"] = parse_networks(raw, "FETCH_ALLOW_NETWORKS")
+    return out
+
+
+def parse_networks(value: str, name: str) -> list[str]:
+    """`"192.168.1.0/24, 10.0.0.5"` → ["192.168.1.0/24", "10.0.0.5/32"] (CIDR; `,` or spaces)."""
+    out = []
+    for item in value.replace(",", " ").split():
+        try:
+            out.append(str(ipaddress.ip_network(item, strict=False)))
+        except ValueError as e:
+            raise EnvError(f"{name}: {item!r} is not an IP address or network (192.168.1.0/24)") from e
     return out
 
 

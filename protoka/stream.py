@@ -8,7 +8,6 @@ is correct regardless of the disk-I/O backend's write-back caching.
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -20,7 +19,24 @@ MAX_READAHEAD_PIECES = 64
 DEADLINE_STEP_MS = 100
 CHUNK = 256 * 1024
 
-_RANGE_RE = re.compile(r"^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$", re.IGNORECASE)
+
+def _digits(s: str) -> bool:
+    return s == "" or (s.isascii() and s.isdigit())
+
+
+def _first_range_spec(header: str) -> tuple[str, str] | None:
+    """`bytes = 10 - 20, …` → ("10", "20"), either side may be empty; None when malformed.
+
+    Plain string splitting: a regex with `\\s*` around optional groups backtracks polynomially on a
+    header full of spaces, and the header comes from the client."""
+    unit, eq, spec = header.partition("=")
+    if not eq or unit.strip().lower() != "bytes":
+        return None
+    start, dash, end = spec.split(",", 1)[0].partition("-")
+    start, end = start.strip(), end.strip()
+    if not dash or not _digits(start) or not _digits(end):
+        return None
+    return start, end
 
 
 class RangeNotSatisfiable(ValueError):
@@ -45,11 +61,10 @@ def parse_range(header: str | None, size: int) -> ByteRange | None:
     """
     if not header:
         return None
-    unit, _, spec = header.partition("=")
-    m = _RANGE_RE.match(f"{unit}={spec.split(',', 1)[0]}")
-    if not m:
+    spec = _first_range_spec(header)
+    if spec is None:
         return None  # malformed → ignore and serve 200 (RFC 9110 §14.2)
-    s, e = m.group(1), m.group(2)
+    s, e = spec
     if s == "" and e == "":
         return None
     if size == 0:
