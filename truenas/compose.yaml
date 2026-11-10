@@ -37,6 +37,8 @@ services:
       SEED_TIME_LIMIT: "0"       # stop seeding a torrent after this time, e.g. 7d (0 = never)
       SEED_MAX_ACTIVE: "0"       # torrents seeding at once, the rest wait in turn (0 = all)
       BG_MAX_CONNECTIONS: "20"   # connections per torrent that nobody is watching
+      # network
+      FETCH_ALLOW_NETWORKS: ""   # LAN networks a .torrent URL may come from, e.g. a local Jackett: 192.168.1.0/24 (empty = public only)
       LOG_LEVEL: "INFO"          # DEBUG also logs every range request and ffmpeg command
     volumes:
       - data:/data  # settings, DHT state and the torrent cache
