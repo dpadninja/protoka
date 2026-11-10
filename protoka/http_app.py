@@ -147,7 +147,8 @@ async def create_from_torrent(request: web.Request) -> web.Response:
             data = bytes.fromhex(blob)
         elif isinstance(src, str):
             # upstream read arbitrary local files and fetched any URL here (B4); see protoka.fetch
-            data = await fetch_torrent(src, TORRENT_FETCH_LIMIT)
+            allow = session_of(request).settings["fetchAllowNetworks"]
+            data = await fetch_torrent(src, TORRENT_FETCH_LIMIT, allow)
         else:
             return error_response("expected 'blob' (hex) or 'from' (URL)", 400)
         ti = lt.torrent_info(data)

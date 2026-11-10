@@ -102,6 +102,7 @@ but cannot change them: `POST /settings` is accepted and ignored, nothing is sav
 | `CACHE_SIZE` | `128G` | cache budget: `128G`, `512M`, `unlimited` (recently watched torrents may exceed it) |
 | `MIN_FREE_DISK` | `2G` | evict when the filesystem has less free space than this |
 | `CACHE_KEEP_RECENT` | `24h` | `CACHE_SIZE` never evicts what was watched this recently (`0` = off); low disk space still does |
+| `FETCH_ALLOW_NETWORKS` | — | `/create` with `{"from": url}` downloads only from public addresses; also allow these networks (`192.168.1.0/24, 10.0.0.5`), e.g. a LAN indexer |
 | `BT_MAX_CONNECTIONS` | `200` | connections per torrent being watched |
 | `BT_DOWNLOAD_LIMIT` | `0` | download cap per torrent, bytes/s (`2M`; `0` = unlimited; any cap delays each request ~0.5 s) |
 | `SUBTITLES_MUX` | `true` | embed the torrent's external subtitles and fonts into the video stream |

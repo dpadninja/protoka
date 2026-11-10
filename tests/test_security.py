@@ -8,7 +8,15 @@ import pytest
 from aiohttp import web
 
 from protoka import logfmt
-from protoka.fetch import FetchRefused, PublicResolver, checked_url, is_public_address
+from protoka.config import EnvError, env_overrides
+from protoka.fetch import (
+    FetchRefused,
+    PublicResolver,
+    checked_url,
+    is_allowed_address,
+    is_public_address,
+    networks,
+)
 from protoka.stream import ByteRange, parse_range
 
 # -- SSRF: /create {"from": …} ---------------------------------------------------------------------
@@ -77,30 +85,68 @@ async def test_resolver_drops_private_addresses(host):
 async def torrent_server(aiohttp_server):
     """A local HTTP server that would hand out a .torrent; records whether it was ever asked."""
     hits: list[str] = []
+    payload = {"body": b"d4:infod4:name1:xee"}
 
     async def handler(request: web.Request) -> web.Response:
         hits.append(request.path)
-        return web.Response(body=b"d4:infod4:name1:xee")
+        return web.Response(body=payload["body"])
 
     app = web.Application()
     app.router.add_get("/{tail:.*}", handler)
     server = await aiohttp_server(app)
-    return server, hits
+    return server, hits, payload
 
 
 async def test_create_from_private_ip_is_refused(client, torrent_server):
-    server, hits = torrent_server
+    server, hits, _ = torrent_server
     resp = await client.post("/create", json={"from": str(server.make_url("/x.torrent"))})
     assert resp.status == 400
     assert hits == []
 
 
 async def test_create_from_name_of_private_host_is_refused(client, torrent_server):
-    server, hits = torrent_server
+    server, hits, _ = torrent_server
     resp = await client.post("/create", json={"from": f"http://localhost:{server.port}/x.torrent"})
     assert resp.status >= 400
     assert hits == []
     assert "localhost" not in (await resp.json())["error"]
+
+
+def test_allow_networks_env():
+    env = {"FETCH_ALLOW_NETWORKS": "192.168.1.0/24, 10.0.0.5 fd00::/8"}
+    assert env_overrides(env)["fetchAllowNetworks"] == ["192.168.1.0/24", "10.0.0.5/32", "fd00::/8"]
+    with pytest.raises(EnvError):
+        env_overrides({"FETCH_ALLOW_NETWORKS": "jackett.lan"})
+
+
+def test_allowed_networks():
+    allow = networks(["192.168.1.0/24", "127.0.0.1"])
+    assert is_allowed_address("192.168.1.20", allow)
+    assert is_allowed_address("::ffff:192.168.1.20", allow)
+    assert not is_allowed_address("192.168.2.20", allow)
+    assert not is_allowed_address("10.0.0.1", allow)
+    assert str(checked_url("http://192.168.1.20:9117/dl/x", allow)) == "http://192.168.1.20:9117/dl/x"
+    with pytest.raises(FetchRefused):
+        checked_url("http://192.168.2.20/x", allow)
+
+
+async def test_resolver_keeps_allowed_networks():
+    resolver = PublicResolver(networks(["127.0.0.0/8"]))
+    try:
+        found = await resolver.resolve("localhost", 80)
+        assert {r["host"] for r in found} == {"127.0.0.1"}
+    finally:
+        await resolver.close()
+
+
+async def test_create_from_allowed_lan_address(client, torrent_server, torrent_session, seed):
+    server, hits, payload = torrent_server
+    torrent_session.settings.update({"fetchAllowNetworks": ["127.0.0.0/8"]})
+    payload["body"] = seed.torrent
+    resp = await client.post("/create", json={"from": f"http://localhost:{server.port}/x.torrent"})
+    assert resp.status == 200
+    assert hits == ["/x.torrent"]
+    assert (await resp.json())["infoHash"] == seed.info_hash
 
 
 # -- paths: the info hash names a cache directory ---------------------------------------------------
