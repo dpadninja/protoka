@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import shutil
 import time
 from collections.abc import Awaitable, Iterable
@@ -26,6 +27,22 @@ from protoka.library.service import LibraryService
 from protoka.trackers import DHT_BOOTSTRAP_NODES, merge_trackers
 
 log = logging.getLogger(__name__)
+
+_INFO_HASH = re.compile(r"[0-9a-f]{40}")
+
+
+def is_info_hash(value: str) -> bool:
+    """A v1 info hash in lowercase hex: the only thing allowed to name a cache directory."""
+    return _INFO_HASH.fullmatch(value) is not None
+
+
+def normalize_info_hash(info_hash: str) -> str:
+    """Lowercase `info_hash`, or ValueError: it becomes a path under the cache and goes to the log."""
+    ih = info_hash.lower()
+    if not is_info_hash(ih):
+        raise ValueError("not an info hash")
+    return ih
+
 
 STATE_FILE = "bt-session.state"
 RESUME_FILE = "resume.dat"
@@ -289,7 +306,13 @@ class TorrentSession:
         return list(self.engines)
 
     def cache_path(self, info_hash: str) -> Path:
-        return self.settings.cache_dir() / info_hash
+        """`<cache>/<info hash>`. The hash is checked and the result must stay inside the cache: callers
+        create, overwrite and rmtree this directory."""
+        root = os.path.normpath(self.settings.cache_dir())
+        path = os.path.normpath(os.path.join(root, normalize_info_hash(info_hash)))
+        if os.path.dirname(path) != root:
+            raise ValueError("cache path escapes the cache directory")
+        return Path(path)
 
     async def create(
         self,
@@ -302,8 +325,9 @@ class TorrentSession:
     ) -> Engine:
         """Get or create the engine for `info_hash` (lowercase hex). Does not wait for metadata.
 
-        `touch=False`: an internal request (our ffmpeg) — it does not count as someone watching."""
-        ih = info_hash.lower()
+        `touch=False`: an internal request (our ffmpeg) — it does not count as someone watching.
+        ValueError if `info_hash` is not 40 hex digits."""
+        ih = normalize_info_hash(info_hash)
         lock = self._locks.setdefault(ih, asyncio.Lock())
         async with lock:
             e = self.engines.get(ih)
@@ -454,6 +478,8 @@ class TorrentSession:
 
         `purge=True` deletes it from the session and from disk."""
         ih = info_hash.lower()
+        if not is_info_hash(ih):
+            return False
         e = self.engines.get(ih)
         if e is None or e.destroyed:
             return False
@@ -467,6 +493,8 @@ class TorrentSession:
     async def purge(self, info_hash: str, *, reason: str = "") -> bool:
         """Remove a torrent from the session and delete its cache directory."""
         ih = info_hash.lower()
+        if not is_info_hash(ih):
+            return False
         e = self.engines.get(ih)
         if e is None or e.destroyed:
             path = self.cache_path(ih)
@@ -509,7 +537,7 @@ class TorrentSession:
         restored = 0
         for d in sorted(root.iterdir()) if root.exists() else []:
             ih = d.name.lower()
-            if not d.is_dir() or len(ih) != 40 or ih in self.engines:
+            if not d.is_dir() or not is_info_hash(ih) or ih in self.engines:
                 continue
             if not ((d / RESUME_FILE).exists() or (d / TORRENT_FILE).exists()):
                 continue  # an orphan: eviction deletes it when space is needed

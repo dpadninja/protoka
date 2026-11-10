@@ -8,6 +8,8 @@ from typing import Any
 
 import regex
 
+from protoka import logfmt
+
 log = logging.getLogger(__name__)
 
 # Upstream regex has unescaped dots and misses some containers (B15).
@@ -94,7 +96,7 @@ def compile_patterns(patterns: Iterable[Any] | None) -> list[regex.Pattern]:
             try:
                 out.append(regex.compile(regex.escape(p)))
             except regex.error:
-                log.debug("bad fileMustInclude pattern %r", p)
+                log.debug("bad fileMustInclude pattern %s", logfmt.clean(repr(p)))
     return out
 
 

@@ -115,8 +115,10 @@ async def read_body(request: web.Request) -> dict[str, Any]:
                 return {}
             body = json.loads(text)
     except ValueError as e:
+        # the parser's message stays in the log: it can quote the body and internals (CodeQL)
+        log.debug("invalid request body: %s", logfmt.clean(e))
         raise web.HTTPBadRequest(
-            text=f'{{"error": "invalid body: {e}"}}', content_type="application/json"
+            text=json.dumps({"error": "invalid body"}), content_type="application/json"
         ) from e
     return body if isinstance(body, dict) else {}
 
@@ -156,7 +158,10 @@ async def create_and_wait(
                 n,
             )
     except EngineError as e:
-        raise web.HTTPServiceUnavailable(text=f'{{"error": "{e}"}}', content_type="application/json") from e
+        log.info("%s stream: torrent unavailable: %s", logfmt.tag(engine), logfmt.clean(e))
+        raise web.HTTPServiceUnavailable(
+            text=json.dumps({"error": "torrent unavailable"}), content_type="application/json"
+        ) from e
     finally:
         if not internal:
             ses.stream_closed(engine)
